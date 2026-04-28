@@ -9,7 +9,9 @@ import { BadgeGrid } from "@/components/BadgeGrid";
 import { TxActivityList } from "@/components/TxActivityList";
 import { CollateralDemo } from "@/components/CollateralDemo";
 import { MintPassportButton } from "@/components/MintPassportButton";
+import { DevnetSetupCard } from "@/components/DevnetSetupCard";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
+import { explorerTx, solscanAsset } from "@/lib/bubblegum";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -124,6 +126,29 @@ export function DashboardPage() {
                 <div className="mt-6 w-full">
                   <MintPassportButton profile={data} />
                 </div>
+                {passport?.cnft && (
+                  <div className="mt-4 w-full text-left rounded-lg border border-secondary/30 bg-secondary/5 p-3 space-y-1.5">
+                    <div className="text-[10px] uppercase tracking-wider text-secondary font-mono">
+                      Soulbound cNFT live on devnet
+                    </div>
+                    <a
+                      href={solscanAsset(passport.cnft.assetId, "devnet")}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block text-xs font-mono break-all text-foreground hover:text-secondary"
+                    >
+                      {passport.cnft.assetId}
+                    </a>
+                    <a
+                      href={explorerTx(passport.cnft.mintSignature, "devnet")}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                    >
+                      View mint tx <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                )}
                 {passport && (
                   <Link
                     href={`/p/${address}`}
@@ -174,6 +199,9 @@ export function DashboardPage() {
               <BadgeGrid badges={data.badges} />
             </CardContent>
           </Card>
+
+          {/* Devnet on-chain mint config */}
+          <DevnetSetupCard address={address} />
 
           {/* Activity + collateral */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

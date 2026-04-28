@@ -24,7 +24,9 @@ import {
   ShieldAlert,
   ArrowLeft,
   Sparkles,
+  ShieldCheck,
 } from "lucide-react";
+import { explorerTx, explorerAddress, solscanAsset } from "@/lib/bubblegum";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 
@@ -205,13 +207,63 @@ export function PassportProfilePage() {
                 </CardContent>
               </Card>
 
+              {passport?.cnft && (
+                <Card className="border-secondary/40 bg-secondary/5">
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-secondary" />
+                      Soulbound cNFT — live on devnet
+                      <span className="text-[10px] uppercase font-mono text-secondary border border-secondary/40 rounded-full px-2 py-0.5">
+                        Bubblegum V2
+                      </span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <ExternalField
+                      label="cNFT asset"
+                      value={passport.cnft.assetId}
+                      href={solscanAsset(passport.cnft.assetId, "devnet")}
+                    />
+                    <ExternalField
+                      label="Mint tx"
+                      value={passport.cnft.mintSignature}
+                      href={explorerTx(passport.cnft.mintSignature, "devnet")}
+                    />
+                    {passport.cnft.freezeSignature && (
+                      <ExternalField
+                        label="setNonTransferableV2 tx"
+                        value={passport.cnft.freezeSignature}
+                        href={explorerTx(passport.cnft.freezeSignature, "devnet")}
+                      />
+                    )}
+                    <ExternalField
+                      label="Core collection"
+                      value={passport.cnft.collectionMint}
+                      href={explorerAddress(passport.cnft.collectionMint, "devnet")}
+                    />
+                    <ExternalField
+                      label="Merkle tree"
+                      value={passport.cnft.merkleTree}
+                      href={explorerAddress(passport.cnft.merkleTree, "devnet")}
+                    />
+                    {passport.cnft.metadataUri && (
+                      <ExternalField
+                        label="Off-chain metadata"
+                        value={passport.cnft.metadataUri}
+                        href={passport.cnft.metadataUri}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
               {passport && (
                 <Card className="border-border/40 bg-card/40">
                   <CardHeader>
                     <CardTitle className="text-base flex items-center gap-2">
                       Verifiable claim
                       <span className="text-[10px] uppercase font-mono text-secondary border border-secondary/40 rounded-full px-2 py-0.5">
-                        cNFT metadata
+                        {passport.cnft ? "on-chain + cached" : "off-chain proof"}
                       </span>
                     </CardTitle>
                   </CardHeader>
@@ -220,7 +272,7 @@ export function PassportProfilePage() {
                     <Field label="Owner" value={passport.address} mono />
                     <Field label="Issued" value={new Date(passport.mintedAt).toLocaleString()} />
                     <Field
-                      label="Owner signature"
+                      label={passport.cnft ? "Mint signature" : "Owner signature"}
                       value={shortAddress(passport.signatureBase58, 16, 16)}
                       mono
                     />
@@ -274,6 +326,31 @@ function Field({
     <div className="grid grid-cols-3 gap-3 text-sm py-1">
       <span className="text-muted-foreground text-xs uppercase tracking-wider">{label}</span>
       <span className={`col-span-2 break-all ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function ExternalField({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: string;
+  href: string;
+}) {
+  return (
+    <div className="grid grid-cols-3 gap-3 text-sm py-1 items-start">
+      <span className="text-muted-foreground text-xs uppercase tracking-wider">{label}</span>
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="col-span-2 font-mono text-xs break-all hover:text-secondary inline-flex items-start gap-1"
+      >
+        <span className="break-all">{value}</span>
+        <ExternalLink className="w-3 h-3 mt-0.5 shrink-0 opacity-60" />
+      </a>
     </div>
   );
 }

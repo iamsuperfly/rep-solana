@@ -104,4 +104,31 @@ Static build via `pnpm --filter @workspace/rep-solana build`. The
 `vite-plugin-node-polyfills` plugin handles Buffer/process bundling for
 production. Output goes to `artifacts/rep-solana/dist/public`.
 
+## @noble/hashes resolution (Stage 2 cNFT minting)
+
+The Metaplex Bubblegum/Core stack pulls in multiple @noble/hashes versions
+that are mutually incompatible at the bundler level:
+
+- `mpl-bubblegum@5` and `mpl-core@1.10` (resolved via the `_@noble+hashes@2.2.0`
+  pnpm peer variant) `require("@noble/hashes/sha3")` — bare specifier that v2
+  no longer exports.
+- `@noble/curves@1.9` uses `require("@noble/hashes/utils")` AND calls the
+  newer `ahash` export only added in v1.7+.
+- `ethereum-cryptography@2.2.1` does `import assert from "@noble/hashes/_assert"`
+  which only works against v1.x where `_assert` ships a default export
+  (removed/deprecated in 1.7+).
+
+`vite.config.ts` therefore aliases every bare `@noble/hashes/<sub>` specifier
+to absolute file paths inside the pnpm store:
+
+- `_assert` → `@noble+hashes@1.5.0/_assert.js` (still has the `assert` default).
+- everything else (`sha2`, `sha3`, `hmac`, `utils`, etc.) →
+  `@noble+hashes@1.8.0/<sub>.js` (has both `ahash` and the back-compat
+  `wrapConstructor` aliases).
+
+`@noble/hashes@1.5.0` is added as a direct dep of `@workspace/rep-solana` so
+those pnpm folders are guaranteed to be installed. Do NOT add a global
+`pnpm.overrides` for `@noble/hashes` — it breaks `ethereum-cryptography` and
+`@noble/curves` simultaneously.
+
 GitHub repo: https://github.com/iamsuperfly/rep-solana

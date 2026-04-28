@@ -53,6 +53,22 @@ export interface MintedPassport {
   mintedAt: number;
   privacy: "public" | "private";
   endorsements: Endorsement[];
+  /**
+   * Real on-chain Bubblegum V2 cNFT data (devnet). Present when the
+   * passport was minted via lib/bubblegum.ts mintRealPassport.
+   */
+  cnft?: CnftMintRecord;
+}
+
+export interface CnftMintRecord {
+  assetId: string;
+  mintSignature: string;
+  freezeSignature?: string;      // setNonTransferableV2 (best-effort)
+  metadataUri: string;
+  collectionMint: string;
+  merkleTree: string;
+  network: "devnet";
+  standard: "metaplex-bubblegum-v2";
 }
 
 export interface Endorsement {
@@ -162,6 +178,33 @@ export async function mintPassport(
     mintedAt: Date.now(),
     privacy: "public",
     endorsements: getPassport(profile.address)?.endorsements ?? [],
+  };
+  const store = readStore();
+  store[profile.address] = passport;
+  writeStore(store);
+  return passport;
+}
+
+/**
+ * Persist a passport that has been minted as a real on-chain cNFT.
+ * Skips the off-chain "proof-of-intent" signMessage step because the
+ * on-chain mint signature is itself the cryptographic proof.
+ */
+export function persistRealMintedPassport(
+  profile: ReputationProfile,
+  cnft: CnftMintRecord,
+): MintedPassport {
+  const metadata = buildMetadata(profile);
+  const passport: MintedPassport = {
+    id: `repsol_${profile.address.slice(0, 8)}_${cnft.mintSignature.slice(0, 8)}`,
+    address: profile.address,
+    network: "devnet",
+    metadata,
+    signatureBase58: cnft.mintSignature,
+    mintedAt: Date.now(),
+    privacy: "public",
+    endorsements: getPassport(profile.address)?.endorsements ?? [],
+    cnft,
   };
   const store = readStore();
   store[profile.address] = passport;
