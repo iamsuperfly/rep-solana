@@ -47,3 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Replit Agent debug screenshots / scratch attachments — never commit these
+# (they bloat the repo and PR diffs). See replit.md "Repo hygiene" for policy.
+attached_assets/

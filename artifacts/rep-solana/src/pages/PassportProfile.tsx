@@ -26,6 +26,8 @@ import {
   Sparkles,
   ShieldCheck,
 } from "lucide-react";
+import { ShareOnX } from "@/components/ShareOnX";
+import { scoreTier } from "@/lib/passport";
 import { explorerTx, explorerAddress, solscanAsset } from "@/lib/bubblegum";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
@@ -65,6 +67,9 @@ export function PassportProfilePage() {
 
   const isPrivate = passport?.privacy === "private";
   const isOwner = publicKey?.toBase58() === validAddress;
+  const earnedBadgeLabels =
+    data?.badges.filter((b) => b.earned).map((b) => b.label) ?? [];
+  const tierLabel = data ? scoreTier(data.score.total).label : undefined;
 
   return (
     <div className="mx-auto max-w-5xl px-4 sm:px-6 py-8 sm:py-12 space-y-6">
@@ -72,7 +77,15 @@ export function PassportProfilePage() {
         <Button variant="ghost" size="sm" onClick={() => navigate("/")} className="gap-2 -ml-2">
           <ArrowLeft className="w-4 h-4" /> Home
         </Button>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <ShareOnX
+            address={validAddress}
+            score={data?.score.total}
+            tier={tierLabel}
+            badges={earnedBadgeLabels}
+            shareKind="passport"
+            variant="outline"
+          />
           <Button variant="outline" size="sm" onClick={copyShare} className="gap-2">
             {copied ? <Check className="w-3.5 h-3.5 text-secondary" /> : <Copy className="w-3.5 h-3.5" />}
             {copied ? "Copied" : "Copy link"}

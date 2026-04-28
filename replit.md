@@ -104,6 +104,39 @@ Static build via `pnpm --filter @workspace/rep-solana build`. The
 `vite-plugin-node-polyfills` plugin handles Buffer/process bundling for
 production. Output goes to `artifacts/rep-solana/dist/public`.
 
+## Repo hygiene
+
+`attached_assets/` is git-ignored. Replit Agent and contributors occasionally
+drop ad-hoc debug screenshots / pasted images there during a session — never
+commit those files. If a screenshot is genuinely part of the product (e.g. a
+README hero image) move it under `artifacts/rep-solana/public/` (or the
+appropriate package's `public/`) and reference it from there.
+
+The pnpm lockfile delta in any future PR should be limited to the package(s)
+you actually changed. If you see unrelated version churn (e.g. `@noble/curves`
+or `ethereum-cryptography` bouncing) it usually means a sub-dep was bumped
+out of catalog — investigate before merging.
+
+## Public verification page
+
+`/verify` (and `/verify/<wallet>`) is the no-wallet-connection-required
+public verifier. It calls Helius DAS `getAssetsByOwner`, filters down to
+RepSolana cNFTs (symbol `REPSOL` + compressed + RepSolana Core collection),
+re-renders the on-chain score / tier / badges / breakdown, and exposes the
+asset id, merkle tree, collection mint, and metadata URI as Solana Explorer
++ Solscan deep links so any third party can independently confirm both the
+soulbound (frozen at the collection) and compressed (Bubblegum V2)
+guarantees. Requires a DAS-capable RPC (Helius) — set `VITE_HELIUS_API_KEY`
+or pass `?heliusKey=…` in the URL for one-off checks. See
+`artifacts/rep-solana/src/lib/das.ts` and `src/pages/Verify.tsx`.
+
+## Twitter / X sharing
+
+`<ShareOnX>` (`src/components/ShareOnX.tsx`) opens the official X intent URL
+with a pre-filled tweet (score, tier, top badges, share link, Solana /
+ColosseumFrontier / RepSolana hashtags). Available on the public passport
+profile (`/p/<wallet>`) and on the Verify result panel.
+
 ## @noble/hashes resolution (Stage 2 cNFT minting)
 
 The Metaplex Bubblegum/Core stack pulls in multiple @noble/hashes versions
