@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
-import { Sparkles } from "lucide-react";
+import { Sparkles, ShieldCheck } from "lucide-react";
 
 export function Navbar() {
   const [loc] = useLocation();
@@ -45,6 +45,14 @@ export function Navbar() {
               My Passport
             </Link>
           )}
+          <Link
+            href="/verify"
+            data-testid="link-nav-verify"
+            className={`px-3 py-1.5 rounded-md transition-colors flex items-center gap-1 ${loc.startsWith("/verify") ? "text-foreground bg-muted/60" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            Verify
+          </Link>
           <a
             href="https://github.com/iamsuperfly/rep-solana"
             target="_blank"

@@ -7,6 +7,7 @@ import { Navbar } from "@/components/Navbar";
 import { LandingPage } from "@/pages/Landing";
 import { DashboardPage } from "@/pages/Dashboard";
 import { PassportProfilePage } from "@/pages/PassportProfile";
+import { VerifyPage } from "@/pages/Verify";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -17,6 +18,8 @@ function Router() {
       <Route path="/" component={LandingPage} />
       <Route path="/dashboard" component={DashboardPage} />
       <Route path="/p/:address" component={PassportProfilePage} />
+      <Route path="/verify" component={VerifyPage} />
+      <Route path="/verify/:address" component={VerifyPage} />
       <Route component={NotFound} />
     </Switch>
   );

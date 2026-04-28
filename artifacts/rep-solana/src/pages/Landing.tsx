@@ -80,6 +80,12 @@ export function LandingPage() {
             ) : (
               <WalletConnectButton size="lg" />
             )}
+            <Link href="/verify">
+              <Button size="lg" variant="outline" className="gap-2 border-border/80" data-testid="link-landing-verify">
+                <ShieldCheck className="w-4 h-4" />
+                Verify a passport
+              </Button>
+            </Link>
             <a
               href="https://github.com/iamsuperfly/rep-solana"
               target="_blank"
