@@ -62,6 +62,46 @@ export default defineConfig({
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
       "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
+      // mpl-core / mpl-bubblegum require bare `@noble/hashes/sha3` etc, but
+      // those bare specifiers fail when the importer's resolved @noble/hashes
+      // is v2.x (only `.js` subpaths exported). Re-route bare subpaths to
+      // absolute file paths so the package `exports` map is bypassed.
+      // _assert → v1.5.0 (has `assert.bool` default export needed by
+      // ethereum-cryptography). Everything else → v1.8.0 (has the new
+      // `ahash` / `anumber` exports required by @noble/curves@^1.9 while
+      // keeping back-compat aliases for older v1.x callers).
+      "@noble/hashes/_assert": path.resolve(
+        import.meta.dirname,
+        "../../node_modules/.pnpm/@noble+hashes@1.5.0/node_modules/@noble/hashes/_assert.js",
+      ),
+      ...Object.fromEntries(
+        [
+          "sha2",
+          "sha3",
+          "sha256",
+          "sha512",
+          "sha3-addons",
+          "hmac",
+          "utils",
+          "crypto",
+          "blake2b",
+          "blake2s",
+          "blake3",
+          "ripemd160",
+          "pbkdf2",
+          "scrypt",
+          "hkdf",
+          "argon2",
+          "eskdf",
+        ].map((name) => [
+          `@noble/hashes/${name}`,
+          path.resolve(
+            import.meta.dirname,
+            "../../node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes",
+            `${name}.js`,
+          ),
+        ]),
+      ),
     },
     dedupe: ["react", "react-dom"],
   },
