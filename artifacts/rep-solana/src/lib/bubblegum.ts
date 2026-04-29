@@ -266,7 +266,13 @@ export async function mintRealPassport(
   const mintSignature = base58.deserialize(mintRes.signature)[0];
 
   // 3. Resolve the leaf from the mint tx → derive asset id.
-  const leaf = await parseLeafFromMintV2Transaction(umi, mintRes.signature);
+  //    `parseLeafFromMintV2Transaction` internally calls `getTransaction(sig)`
+  //    and throws "Could not get transaction from signature" if the RPC
+  //    hasn't indexed the tx yet (typical 1–6s lag on public devnet even
+  //    after `sendAndConfirm` returns). We poll with backoff so a brief
+  //    indexing delay no longer surfaces as a "mint failed" toast for an
+  //    already-successful on-chain mint.
+  const leaf = await parseLeafWithRetry(umi, mintRes.signature);
   const [assetIdPda] = findLeafAssetIdPda(umi, {
     merkleTree: merkleTreePk,
     leafIndex: leaf.nonce,
@@ -290,6 +296,47 @@ export async function mintRealPassport(
     merkleTree: cfg.merkleTree,
     network: "devnet",
   };
+}
+
+/**
+ * Wraps `parseLeafFromMintV2Transaction` in a polling retry loop so a brief
+ * RPC indexing lag (the tx is confirmed but `getTransaction` still returns
+ * null for a few seconds) doesn't surface as a "mint failed" error.
+ *
+ * Strategy: 12 attempts over ~12s, exponential-ish backoff capped at 1.5s.
+ * If we still can't fetch the tx, throw a clearer message that tells the
+ * user the mint actually landed and the app will catch up on refresh.
+ */
+async function parseLeafWithRetry(
+  umi: Umi,
+  signature: Uint8Array,
+  attempts = 12,
+): Promise<{ nonce: bigint }> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      // First poll getTransaction directly — cheaper than parseLeaf which
+      // does extra account lookups when the tx exists but is malformed.
+      const tx = await umi.rpc.getTransaction(signature);
+      if (tx) {
+        return await parseLeafFromMintV2Transaction(umi, signature);
+      }
+    } catch (err) {
+      lastErr = err;
+      // If the failure is something other than the tx-not-found case, it
+      // won't recover with more polling — re-throw immediately.
+      const msg = (err as Error)?.message ?? "";
+      if (!/Could not get transaction|getTransaction|fetch/i.test(msg)) {
+        throw err;
+      }
+    }
+    const wait = Math.min(1500, 400 + i * 200);
+    await new Promise((r) => setTimeout(r, wait));
+  }
+  throw new Error(
+    "Mint landed on-chain but the RPC indexer is lagging — refresh the page in a few seconds to see your passport. " +
+      ((lastErr as Error)?.message ?? ""),
+  );
 }
 
 // ---------------------------------------------------------------------------
