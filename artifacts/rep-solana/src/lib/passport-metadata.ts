@@ -67,8 +67,24 @@ export function buildOnChainMetadata(
       : 0;
   const image = passportImageDataUri(profile);
 
+  // ⚠ Solana's MetadataArgsV2.name has a HARD 32-byte limit. Anything
+  // longer is silently truncated by the SDK — and crucially, that truncated
+  // form is what the leaf hash commits to ON-CHAIN forever. We MUST keep
+  // the score early in the name so it never gets clipped, even for a
+  // 100-point Legendary passport.
+  //
+  // Format:                 "RepSolana #100 · Legendary"   (26 bytes ✓)
+  //                         "RepSolana #50 · Active"       (22 bytes ✓)
+  //                         "RepSolana #0 · New"           (18 bytes ✓)
+  //
+  // The two `·` characters are 2 bytes each in UTF-8; everything else is
+  // ASCII. Worst case (3-digit score + "Legendary") = 26 bytes — well
+  // within budget. The score immediately after `#` is what
+  // `parseScoreFromAsset` reads as the canonical on-chain truth.
+  const onChainName = `RepSolana #${profile.score.total} · ${tier}`;
+
   return {
-    name: `RepSolana Passport · ${tier} · ${profile.score.total}`,
+    name: onChainName,
     symbol: "REPSOL",
     description:
       "Soulbound, compressed reputation passport on Solana. " +
