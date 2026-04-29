@@ -222,27 +222,41 @@ export interface PassportJsonShape {
 /**
  * Extract the reputation score from an on-chain RepSolana passport.
  *
- * We layer the lookup so a partial outage of any one source still yields
- * the correct score — `0` is only returned when *every* source is missing
- * (which means the asset isn't really a RepSolana passport):
+ * Returns the score number when at least one source could parse it, or
+ * `null` when every source is missing — the caller MUST distinguish
+ * "score is genuinely 0" from "we don't know the score" so we don't
+ * falsely flag the user as needing an update.
  *
- *   1. **On-chain `name` field** (most reliable). We bake the score into
- *      the cNFT name at mint time as `RepSolana Passport · {tier} · {n}`.
- *      The name is stored in the leaf hash and is therefore part of the
- *      cryptographic on-chain commitment — DAS can't miss it.
- *   2. Off-chain JSON's `repsolana.score` (canonical claim block).
- *   3. The on-chain `Score` attribute populated by the indexer when it
- *      successfully fetched the off-chain JSON.
+ * Sources in priority order:
+ *
+ *   1. **On-chain `name` field, `#NN` format** (canonical truth from
+ *      v3 onwards). We bake the score into the cNFT name as
+ *      `RepSolana #{score} · {tier}`. The name lives in the leaf
+ *      hash → it's part of the on-chain commitment and the indexer
+ *      cannot miss it. Format constrained to fit Bubblegum's 32-byte
+ *      `MetadataArgsV2.name` limit so the score never gets truncated.
+ *   2. Off-chain JSON's `repsolana.score` (richer claim block, but
+ *      depends on the URI being reachable).
+ *   3. The on-chain `Score` attribute populated by the indexer when
+ *      it successfully fetched the off-chain JSON.
+ *   4. Trailing integer in the name — back-compat for v2 passports
+ *      minted as `RepSolana Passport · {tier} · {score}` *only* when
+ *      the SDK didn't truncate it (rare; most v2 mints lost the score).
+ *
+ * Returns `null` if none of the above could yield a finite number, so
+ * the UI can offer a "Migrate Passport" CTA instead of looping the
+ * user through false "Update Passport" prompts against a phantom 0.
  */
 export function parseScoreFromAsset(
   asset: DasAsset,
   json: PassportJsonShape | null,
-): number {
-  // 1) Parse from the on-chain name.
+): number | null {
   const name = asset.content?.metadata?.name ?? "";
-  const trailing = name.match(/(\d+)\s*$/);
-  if (trailing) {
-    const n = parseInt(trailing[1], 10);
+
+  // 1) `#NN` format — primary on-chain source from v3 onwards.
+  const hashMatch = name.match(/#(\d+)\b/);
+  if (hashMatch) {
+    const n = parseInt(hashMatch[1], 10);
     if (Number.isFinite(n)) return n;
   }
   // 2) Off-chain JSON.
@@ -253,29 +267,87 @@ export function parseScoreFromAsset(
   )?.value;
   if (typeof attr === "number" && Number.isFinite(attr)) return attr;
   if (typeof attr === "string" && /^\d+$/.test(attr)) return parseInt(attr, 10);
-  return 0;
+  // 4) Trailing integer (legacy v2 format that survived truncation).
+  const trailing = name.match(/(\d+)\s*$/);
+  if (trailing) {
+    const n = parseInt(trailing[1], 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
 /**
  * Look up a wallet's RepSolana passport (if any) using Helius DAS.
- * Returns the most-recently-minted passport when multiple exist.
+ *
+ * Wallets often own MULTIPLE passport cNFTs (every "Update Passport"
+ * mints a fresh one — the old one is still on-chain because Bubblegum
+ * doesn't support burn-on-update for soulbound assets). Picking the
+ * wrong one causes the dashboard to flap between scores. Selection
+ * order:
+ *
+ *   1. If `expected.collectionMint` is provided (i.e. we have a local
+ *      devnet config from a prior setup on this wallet), restrict the
+ *      candidate set to that collection. This guarantees we follow
+ *      the user's "real" collection rather than a stale test one.
+ *   2. Among the surviving candidates, prefer those with a
+ *      **parseable score** (the v3 `#NN` name format). They're the
+ *      newer mints and the source of truth for "do I need an update?".
+ *   3. Within whichever subset survives, pick the highest `leaf_id`
+ *      (within a single tree, leaf_id is monotonically increasing →
+ *      effectively a mint timestamp).
  */
 export async function findRepSolanaPassportForWallet(
   walletAddress: string,
+  expected?: { collectionMint?: string; merkleTree?: string },
 ): Promise<VerifiedPassport | null> {
   const result = await getAssetsByOwner(walletAddress, 1, 100);
-  const candidates = result.items.filter(isRepSolanaPassport);
+  let candidates = result.items.filter(isRepSolanaPassport);
   if (candidates.length === 0) return null;
 
-  // Most-recently-minted = highest leaf_id within the same tree.
-  candidates.sort((a, b) => (b.compression?.leaf_id ?? 0) - (a.compression?.leaf_id ?? 0));
-  const asset = candidates[0];
+  // Step 1: scope to the user's known collection if we have one.
+  if (expected?.collectionMint) {
+    const filtered = candidates.filter(
+      (c) =>
+        c.grouping?.find((g) => g.group_key === "collection")?.group_value ===
+        expected.collectionMint,
+    );
+    if (filtered.length > 0) candidates = filtered;
+  }
+  if (expected?.merkleTree) {
+    const filtered = candidates.filter(
+      (c) => c.compression?.tree === expected.merkleTree,
+    );
+    if (filtered.length > 0) candidates = filtered;
+  }
+
+  // Step 2: prefer candidates with a parseable score (v3 `#NN` format).
+  // `parseScoreFromAsset` returns null for legacy passports whose name
+  // got truncated by Bubblegum's 32-byte name limit and whose JSON URI
+  // points at the SPA HTML (= score is unrecoverable from chain).
+  const withScore = candidates.filter(
+    (c) => parseScoreFromAsset(c, null) !== null,
+  );
+  const pool = withScore.length > 0 ? withScore : candidates;
+
+  // Step 3: highest leaf_id within whichever tree contains the most
+  // recent activity. Sorting by leaf_id alone is meaningless across
+  // trees, so we group by tree and pick the highest-leaf tree first.
+  pool.sort((a, b) => (b.compression?.leaf_id ?? 0) - (a.compression?.leaf_id ?? 0));
+  const asset = pool[0];
 
   let json: PassportJsonShape | null = null;
   try {
-    if (asset.content?.json_uri) {
-      const r = await fetch(asset.content.json_uri, { method: "GET" });
-      if (r.ok) json = (await r.json()) as PassportJsonShape;
+    if (asset.content?.json_uri && /^https?:\/\//.test(asset.content.json_uri)) {
+      const r = await fetch(asset.content.json_uri, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      // Guard against the SPA-fallback URL returning HTML — only
+      // treat as JSON when the response actually parses.
+      const ct = r.headers.get("content-type") ?? "";
+      if (r.ok && /json/i.test(ct)) {
+        json = (await r.json()) as PassportJsonShape;
+      }
     }
   } catch {
     json = null;

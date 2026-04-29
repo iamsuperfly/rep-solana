@@ -124,7 +124,7 @@ export function DashboardPage() {
               <CardContent className="p-6 sm:p-8 flex flex-col items-center text-center">
                 <ScoreGauge score={data.score.total} />
                 <div className="mt-6 w-full">
-                  <MintPassportButton profile={data} />
+                  <MintPassportButton profile={data} liveLoading={loading} />
                 </div>
                 {passport?.cnft && (
                   <div className="mt-4 w-full text-left rounded-lg border border-secondary/30 bg-secondary/5 p-3 space-y-1.5">
