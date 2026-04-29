@@ -164,4 +164,39 @@ those pnpm folders are guaranteed to be installed. Do NOT add a global
 `pnpm.overrides` for `@noble/hashes` — it breaks `ethereum-cryptography` and
 `@noble/curves` simultaneously.
 
+## On-chain name format (Stage 7 — v3 passport)
+
+Solana's Bubblegum `MetadataArgsV2.name` field has a HARD 32-byte limit;
+anything longer is silently truncated by the SDK and the truncated string
+is what the leaf hash commits to ON-CHAIN forever. Our v2 format
+(`RepSolana Passport · Active · 50` = 34 bytes) lost the score on every
+mint, leaving on-chain `name = "RepSolana Passport · Active"` with no way
+to recover the score from chain.
+
+v3 uses `RepSolana #{score} · {tier}` — score appears immediately after
+`#` and the entire string fits even at the worst case
+(`RepSolana #100 · Legendary` = 26 bytes). `parseScoreFromAsset` reads
+that as canonical truth and returns `null` (NOT `0`) when no parser
+matches, so the UI can offer a one-time **Migrate Passport** flow for
+v2-era passports rather than looping the user through false update
+prompts.
+
+Other Stage-7 hardenings:
+
+- `findRepSolanaPassportForWallet(addr, expected)` filters candidates by
+  the wallet's known collection/tree first, then prefers parseable scores,
+  then highest leaf id — fixes "wrong asset wins" when a wallet has many
+  test passports across multiple trees.
+- `persistRealMintedPassport(profile, cnft, { preserveTimestamps: true })`
+  keeps the original `mintedAt` and `metadata.repsolana.issuedAt` when
+  hydrating from chain, so the UI no longer reissues the date on every
+  wallet reconnect.
+- `MintPassportButton` cold-loads from a 60s sessionStorage cache (no
+  initial spinner if recent), then refreshes silently in the background.
+- After a fresh mint, hydration polls DAS up to 30s for the just-minted
+  asset id and ignores stale answers that would roll back the optimistic
+  state during devnet indexer lag.
+- The button now accepts `liveLoading` from Dashboard so it can suppress
+  the "Update Passport" prompt while the live profile is still resolving.
+
 GitHub repo: https://github.com/iamsuperfly/rep-solana

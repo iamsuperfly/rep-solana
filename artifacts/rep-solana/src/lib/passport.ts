@@ -189,22 +189,45 @@ export async function mintPassport(
  * Persist a passport that has been minted as a real on-chain cNFT.
  * Skips the off-chain "proof-of-intent" signMessage step because the
  * on-chain mint signature is itself the cryptographic proof.
+ *
+ * Pass `preserveTimestamps: true` when persisting from a chain hydration
+ * pass (i.e. discovering an existing passport, NOT a fresh mint). That
+ * keeps the original `mintedAt` and `metadata.repsolana.issuedAt` so the
+ * UI doesn't appear to "re-issue" the passport every time the wallet
+ * reconnects. We still refresh the rest of the metadata to track score
+ * drift, badge changes, etc.
  */
 export function persistRealMintedPassport(
   profile: ReputationProfile,
   cnft: CnftMintRecord,
+  options: { preserveTimestamps?: boolean } = {},
 ): MintedPassport {
+  const existing = getPassport(profile.address);
   const metadata = buildMetadata(profile);
+  if (options.preserveTimestamps && existing) {
+    metadata.repsolana.issuedAt = existing.metadata.repsolana.issuedAt;
+  }
+  // When hydrating from chain we may not know the original mint signature
+  // (DAS doesn't return it). Prefer the existing one over an empty string
+  // so we don't wipe a real signature already cached locally.
+  const mintSignature =
+    cnft.mintSignature || existing?.cnft?.mintSignature || "";
   const passport: MintedPassport = {
-    id: `repsol_${profile.address.slice(0, 8)}_${cnft.mintSignature.slice(0, 8)}`,
+    id:
+      options.preserveTimestamps && existing
+        ? existing.id
+        : `repsol_${profile.address.slice(0, 8)}_${(mintSignature || cnft.assetId).slice(0, 8)}`,
     address: profile.address,
     network: "devnet",
     metadata,
-    signatureBase58: cnft.mintSignature,
-    mintedAt: Date.now(),
-    privacy: "public",
-    endorsements: getPassport(profile.address)?.endorsements ?? [],
-    cnft,
+    signatureBase58: mintSignature,
+    mintedAt:
+      options.preserveTimestamps && existing
+        ? existing.mintedAt
+        : Date.now(),
+    privacy: existing?.privacy ?? "public",
+    endorsements: existing?.endorsements ?? [],
+    cnft: { ...cnft, mintSignature },
   };
   const store = readStore();
   store[profile.address] = passport;
