@@ -132,18 +132,24 @@ export async function initializeDevnetCollection(
   const umi = buildUmi(walletAdapter);
   const owner = walletAdapter.publicKey.toBase58();
 
-  // 1) Create the Core collection with PermanentFreezeDelegate (frozen=true)
-  //    All cNFTs minted into it are soulbound by default.
+  // 1) Create the Core collection with two collection-level plugins:
+  //
+  //    a) `BubblegumV2`  ─ REQUIRED. Marks this Core collection as a valid
+  //       Bubblegum V2 collection so `mintV2(coreCollection: ...)` is
+  //       accepted. Without it, mintV2 reverts with 0x17a1
+  //       ("Core collections must have the Bubblegum V2 plugin").
+  //
+  //    b) `PermanentFreezeDelegate` (frozen=true) ─ enforces soulbound:
+  //       every cNFT minted into the collection inherits the freeze →
+  //       transfer instructions revert at the collection level.
   const collectionSigner = generateSigner(umi);
   const collectionTxBuilder = createCollection(umi, {
     collection: collectionSigner,
     name: "RepSolana Soulbound Reputation Passport",
     uri: "https://repsolana.app/collection.json",
     plugins: [
-      {
-        type: "PermanentFreezeDelegate",
-        frozen: true,
-      },
+      { type: "BubblegumV2" },
+      { type: "PermanentFreezeDelegate", frozen: true },
     ],
   });
 
