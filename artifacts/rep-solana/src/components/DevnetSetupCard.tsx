@@ -6,19 +6,16 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
 import {
   getDevnetConfig,
   getDevnetBalance,
   explorerAddress,
-  clearDevnetConfig,
   type DevnetCollectionConfig,
 } from "@/lib/bubblegum";
-import { Coins, ExternalLink, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { Coins, ExternalLink, RefreshCcw, ShieldCheck } from "lucide-react";
 import { shortAddress } from "@/lib/format";
 
 export function DevnetSetupCard({ address }: { address: string }) {
-  const { toast } = useToast();
   const [cfg, setCfg] = useState<DevnetCollectionConfig | null>(() =>
     getDevnetConfig(address),
   );
@@ -51,14 +48,6 @@ export function DevnetSetupCard({ address }: { address: string }) {
     refreshBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address]);
-
-  function handleReset() {
-    clearDevnetConfig(address);
-    toast({
-      title: "Devnet config cleared",
-      description: "Next mint will run setup again from scratch.",
-    });
-  }
 
   return (
     <Card className="border-secondary/30 bg-secondary/5">
@@ -122,17 +111,6 @@ export function DevnetSetupCard({ address }: { address: string }) {
               <ExternalLink className="w-3 h-3 opacity-60" />
             </a>
           </Button>
-          {cfg && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleReset}
-              className="gap-1.5 text-xs text-muted-foreground"
-            >
-              <Trash2 className="w-3 h-3" />
-              Reset
-            </Button>
-          )}
         </div>
       </CardContent>
     </Card>

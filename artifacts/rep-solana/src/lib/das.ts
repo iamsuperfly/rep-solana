@@ -220,6 +220,43 @@ export interface PassportJsonShape {
 }
 
 /**
+ * Extract the reputation score from an on-chain RepSolana passport.
+ *
+ * We layer the lookup so a partial outage of any one source still yields
+ * the correct score — `0` is only returned when *every* source is missing
+ * (which means the asset isn't really a RepSolana passport):
+ *
+ *   1. **On-chain `name` field** (most reliable). We bake the score into
+ *      the cNFT name at mint time as `RepSolana Passport · {tier} · {n}`.
+ *      The name is stored in the leaf hash and is therefore part of the
+ *      cryptographic on-chain commitment — DAS can't miss it.
+ *   2. Off-chain JSON's `repsolana.score` (canonical claim block).
+ *   3. The on-chain `Score` attribute populated by the indexer when it
+ *      successfully fetched the off-chain JSON.
+ */
+export function parseScoreFromAsset(
+  asset: DasAsset,
+  json: PassportJsonShape | null,
+): number {
+  // 1) Parse from the on-chain name.
+  const name = asset.content?.metadata?.name ?? "";
+  const trailing = name.match(/(\d+)\s*$/);
+  if (trailing) {
+    const n = parseInt(trailing[1], 10);
+    if (Number.isFinite(n)) return n;
+  }
+  // 2) Off-chain JSON.
+  if (typeof json?.repsolana?.score === "number") return json.repsolana.score;
+  // 3) Indexer-populated attribute.
+  const attr = asset.content?.metadata?.attributes?.find(
+    (a) => a.trait_type === "Score",
+  )?.value;
+  if (typeof attr === "number" && Number.isFinite(attr)) return attr;
+  if (typeof attr === "string" && /^\d+$/.test(attr)) return parseInt(attr, 10);
+  return 0;
+}
+
+/**
  * Look up a wallet's RepSolana passport (if any) using Helius DAS.
  * Returns the most-recently-minted passport when multiple exist.
  */
