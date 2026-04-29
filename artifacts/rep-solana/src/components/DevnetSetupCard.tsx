@@ -4,30 +4,26 @@
  * judges can fund a fresh wallet without leaving the page.
  */
 import { useEffect, useState } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
   getDevnetConfig,
   getDevnetBalance,
-  requestDevnetAirdrop,
   explorerAddress,
   clearDevnetConfig,
   type DevnetCollectionConfig,
 } from "@/lib/bubblegum";
-import { Coins, ExternalLink, Loader2, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { Coins, ExternalLink, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { shortAddress } from "@/lib/format";
 
 export function DevnetSetupCard({ address }: { address: string }) {
-  const wallet = useWallet();
   const { toast } = useToast();
   const [cfg, setCfg] = useState<DevnetCollectionConfig | null>(() =>
     getDevnetConfig(address),
   );
   const [balance, setBalance] = useState<number | null>(null);
   const [loadingBal, setLoadingBal] = useState(false);
-  const [airdropping, setAirdropping] = useState(false);
 
   useEffect(() => {
     function refresh() {
@@ -55,30 +51,6 @@ export function DevnetSetupCard({ address }: { address: string }) {
     refreshBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address]);
-
-  async function handleAirdrop() {
-    if (!wallet.publicKey) return;
-    setAirdropping(true);
-    try {
-      await requestDevnetAirdrop(wallet, 1);
-      toast({
-        title: "Airdropped 1 devnet SOL",
-        description: "It can take a few seconds to settle.",
-      });
-      setTimeout(refreshBalance, 1500);
-    } catch (err) {
-      const e = err as Error;
-      toast({
-        title: "Airdrop failed",
-        description:
-          e.message ??
-          "Public devnet faucet may be rate-limited. Try https://faucet.solana.com",
-        variant: "destructive",
-      });
-    } finally {
-      setAirdropping(false);
-    }
-  }
 
   function handleReset() {
     clearDevnetConfig(address);
@@ -135,18 +107,20 @@ export function DevnetSetupCard({ address }: { address: string }) {
 
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button
+            asChild
             variant="outline"
             size="sm"
-            onClick={handleAirdrop}
-            disabled={airdropping || !wallet.connected}
             className="gap-1.5 text-xs"
           >
-            {airdropping ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : (
+            <a
+              href="https://faucet.solana.com"
+              target="_blank"
+              rel="noreferrer noopener"
+            >
               <Coins className="w-3 h-3" />
-            )}
-            Airdrop 1 SOL
+              Claim devnet SOL (opens faucet)
+              <ExternalLink className="w-3 h-3 opacity-60" />
+            </a>
           </Button>
           {cfg && (
             <Button
