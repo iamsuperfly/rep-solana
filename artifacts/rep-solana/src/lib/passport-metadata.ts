@@ -7,10 +7,28 @@
  * call fails (e.g. CORS in some browsers, rate limit) we fall back to
  * embedding the metadata as a data URI — the on-chain mint still
  * succeeds and the assertion is still verifiable on Explorer.
+ *
+ * Image strategy:
+ *   The cNFT `image` field points to the single static collection image
+ *   (`/passport.png`) so every holder sees the same unified passport
+ *   visual in their wallet (Phantom, Backpack, etc.). Per-holder richness
+ *   — score, tier, badges — lives in the `attributes` array and in the
+ *   app's public profile page (/p/<address>). The inline SVG generated
+ *   by `passportImageDataUri` is still used for the in-app PassportCard
+ *   UI; it is NOT baked into the on-chain metadata image field.
  */
 
 import type { ReputationProfile } from "./solana";
-import { passportImageDataUri, scoreTier } from "./passport";
+import { scoreTier } from "./passport";
+
+/** Stable HTTPS URL of the single shared collection image shown in wallets. */
+function collectionImageUrl(): string {
+  const origin =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "https://repsolana.app";
+  return `${origin}/passport.png`;
+}
 
 export interface OnChainMetadataAttribute {
   trait_type: string;
@@ -65,7 +83,10 @@ export function buildOnChainMetadata(
     profile.stats.totalTxs > 0
       ? profile.stats.successTxs / profile.stats.totalTxs
       : 0;
-  const image = passportImageDataUri(profile);
+
+  // Single static collection image — same for every holder in their wallet.
+  // Per-holder score/tier/badges are expressed through `attributes` below.
+  const image = collectionImageUrl();
 
   // ⚠ Solana's MetadataArgsV2.name has a HARD 32-byte limit. Anything
   // longer is silently truncated by the SDK — and crucially, that truncated
@@ -112,7 +133,7 @@ export function buildOnChainMetadata(
     properties: {
       category: "image",
       creators: [{ address: profile.address, share: 100 }],
-      files: [{ uri: image, type: "image/svg+xml" }],
+      files: [{ uri: image, type: "image/png" }],
     },
     repsolana: {
       version: "2.0",
