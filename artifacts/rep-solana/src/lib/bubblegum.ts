@@ -232,7 +232,15 @@ export async function mintRealPassport(
   const metadataUri = await uploadMetadataJSON(fullMetadata);
 
   // 2. mintV2: compressed mint into the Core collection.
-  const tier = fullMetadata.attributes.find((a) => a.trait_type === "Tier")?.value ?? "Active";
+  //
+  // ⚠ Use the pre-computed `fullMetadata.name` — DO NOT rebuild the name
+  // here. `buildOnChainMetadata` already applies the v3 format
+  // `RepSolana #{score} · {tier}` which is verified to fit within
+  // Bubblegum's hard 32-byte MetadataArgsV2.name limit. Rebuilding
+  // a different string here is what caused every previous mint to
+  // produce the old `"RepSolana Passport · {tier}"` v2 format (which
+  // exceeded 32 bytes when the score was appended, so the SDK silently
+  // truncated the score off — making it unrecoverable from chain).
   const ownerPk = toPublicKey(owner);
   const mintBuilder = mintV2(umi, {
     leafOwner: ownerPk,
@@ -240,7 +248,7 @@ export async function mintRealPassport(
     merkleTree: merkleTreePk,
     coreCollection: collectionPk,
     metadata: {
-      name: `RepSolana Passport · ${tier}`,
+      name: fullMetadata.name,
       symbol: "REPSOL",
       uri: metadataUri,
       sellerFeeBasisPoints: 0,
