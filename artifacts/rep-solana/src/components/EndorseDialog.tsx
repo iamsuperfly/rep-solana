@@ -21,13 +21,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
   Transaction,
   TransactionInstruction,
+  Connection,
 } from "@solana/web3.js";
 import { addEndorsement, type Endorsement } from "@/lib/passport";
 import { useToast } from "@/hooks/use-toast";
@@ -45,10 +46,8 @@ export function EndorseDialog({
   network: "mainnet-beta" | "devnet";
 }) {
   const { publicKey, sendTransaction, connected } = useWallet();
-  const { connection } = useConnection();
   const { toast } = useToast();
   // Always fetch score from mainnet-beta — that's where real on-chain history lives.
-  // The TX itself goes to whatever cluster the wallet is connected to (devnet for hackathon).
   const { data: endorserProfile } = useReputation(publicKey?.toBase58() ?? null, "mainnet-beta");
 
   const [open, setOpen] = useState(false);
@@ -63,6 +62,9 @@ export function EndorseDialog({
     if (!publicKey) return;
     setBusy(true);
     try {
+      // Create devnet connection for TX (hackathon: free devnet SOL, not real money)
+      const devnetConnection = new Connection("https://api.devnet.solana.com", "confirmed");
+      
       const recipient = new PublicKey(recipientAddress);
       const lamports = Math.floor(0.001 * LAMPORTS_PER_SOL);
 
@@ -84,8 +86,8 @@ export function EndorseDialog({
         );
       }
 
-      const signature = await sendTransaction(tx, connection);
-      await connection.confirmTransaction(signature, "confirmed");
+      const signature = await sendTransaction(tx, devnetConnection);
+      await devnetConnection.confirmTransaction(signature, "confirmed");
 
       const endorsement: Endorsement = {
         from: publicKey.toBase58(),
@@ -132,8 +134,8 @@ export function EndorseDialog({
         <DialogHeader>
           <DialogTitle>Endorse this passport</DialogTitle>
           <DialogDescription>
-            Send 0.001 SOL on {network === "mainnet-beta" ? "mainnet" : "devnet"} as a
-            verifiable on-chain endorsement. Your signature is recorded forever.
+            Send 0.001 SOL on devnet as a verifiable on-chain endorsement.
+            Your signature is recorded forever. (Hackathon: devnet tokens, no real cost)
           </DialogDescription>
         </DialogHeader>
 

@@ -11,12 +11,11 @@ import { CollateralDemo } from "@/components/CollateralDemo";
 import { MintPassportButton } from "@/components/MintPassportButton";
 import { DevnetSetupCard } from "@/components/DevnetSetupCard";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
-import { explorerTx, solscanAsset, burnPassportOnChain } from "@/lib/bubblegum";
+import { explorerTx, solscanAsset } from "@/lib/bubblegum";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { setPrivacy, markAssetBurned, getLeaderboardEntries } from "@/lib/passport";
-import { findAllRepSolanaPassports } from "@/lib/das";
+import { setPrivacy, getLeaderboardEntries } from "@/lib/passport";
 import {
   RefreshCcw,
   AlertCircle,
@@ -25,7 +24,6 @@ import {
   EyeOff,
   Share2,
   ExternalLink,
-  Trash2,
   Loader2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -37,58 +35,10 @@ export function DashboardPage() {
   const address = publicKey?.toBase58() ?? null;
   const { data, loading, error, refresh } = useReputation(address, "mainnet-beta");
   const passport = usePassport(address);
-  const [oldPassports, setOldPassports] = useState<any[]>([]);
-  const [loadingOld, setLoadingOld] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { toast } = useToast();
   const leaderboard = getLeaderboardEntries();
 
-  // Load all passports from DAS for burning
-  useEffect(() => {
-    if (!address) return;
-    setLoadingOld(true);
-    findAllRepSolanaPassports(address)
-      .then((allPassports) => {
-        setOldPassports(allPassports);
-      })
-      .catch(() => setOldPassports([]))
-      .finally(() => setLoadingOld(false));
-  }, [address]);
-
-  async function handleBurnPassport(passport: any) {
-    if (!connected || !publicKey || !passport) return;
-    try {
-      // VerifiedPassport stores compression data inside `.asset.compression`
-      const compression = passport.asset?.compression;
-      if (!compression) {
-        throw new Error("No compression data available — DAS may not have indexed this asset yet");
-      }
-      const burnSig = await burnPassportOnChain(
-        { publicKey } as any,
-        compression.tree,
-        compression.leaf_id,
-        address!,
-        {
-          dataHash: new Uint8Array(Buffer.from(compression.data_hash.replace(/^0x/, ""), "hex")),
-          creatorHash: new Uint8Array(Buffer.from(compression.creator_hash.replace(/^0x/, ""), "hex")),
-          root: new Uint8Array(Buffer.from(compression.asset_hash.replace(/^0x/, ""), "hex")),
-        },
-      );
-      markAssetBurned(passport.id);
-      toast({
-        title: "Passport burned on-chain",
-        description: `Signature: ${burnSig.slice(0, 8)}...`,
-      });
-      setOldPassports((prev) => prev.filter((p) => p.id !== passport.id));
-    } catch (err) {
-      const e = err as Error;
-      toast({
-        title: "Burn failed",
-        description: e.message ?? "Could not burn passport",
-        variant: "destructive",
-      });
-    }
-  }
 
   if (!connected || !address) {
     return (
@@ -253,43 +203,6 @@ export function DashboardPage() {
             </CardContent>
           </Card>
 
-          {oldPassports.length > 0 && (
-            <Card className="border-amber-500/40 bg-amber-500/5">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Trash2 className="w-4 h-4 text-amber-600" />
-                  Burn Old Passports
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Found {oldPassports.length} passport(s) on-chain. Burn old mints to clean up your collection.
-                </p>
-                {oldPassports.map((p, i) => (
-                  <div
-                    key={p.id || i}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3"
-                  >
-                    <div className="text-xs">
-                      <div className="font-mono">{p.assetId?.slice(0, 12) || p.id?.slice(0, 12)}...</div>
-                      <div className="text-[11px] text-muted-foreground mt-1">
-                        {p.compression?.leaf_id !== undefined ? `Leaf ${p.compression.leaf_id}` : "On-chain"}
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => handleBurnPassport(p)}
-                      className="gap-1"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Burn
-                    </Button>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
 
           <Card>
             <CardHeader className="flex-row items-center justify-between">
