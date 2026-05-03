@@ -106,7 +106,7 @@ export function PassportProfilePage() {
             </Button>
           </a>
           {!isOwner && passport && (
-            <EndorseDialog recipientAddress={validAddress} network={passport.network} />
+            <EndorseDialog recipientAddress={validAddress} network="devnet" />
           )}
         </div>
       </div>

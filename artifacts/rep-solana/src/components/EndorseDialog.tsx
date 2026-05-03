@@ -5,8 +5,8 @@
  * passport owner with an attached memo. The signature is stored on the
  * passport so anyone viewing the profile can verify the endorsement.
  *
- * Defaults to mainnet-beta for real on-chain endorsements.
- * Devnet endorsements available only when viewing devnet passports.
+ * Uses devnet by default for hackathon (no SOL cost).
+ * Network is passed in from parent to match the passport's network.
  */
 import { useState } from "react";
 import {
