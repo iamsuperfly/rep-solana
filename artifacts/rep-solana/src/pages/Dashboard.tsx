@@ -16,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { setPrivacy, markAssetBurned, getLeaderboardEntries } from "@/lib/passport";
-import { findRepSolanaPassportForWallet } from "@/lib/das";
+import { findAllRepSolanaPassports } from "@/lib/das";
 import {
   RefreshCcw,
   AlertCircle,
@@ -43,15 +43,13 @@ export function DashboardPage() {
   const { toast } = useToast();
   const leaderboard = getLeaderboardEntries();
 
-  // Load old passports from DAS for burning
+  // Load all passports from DAS for burning
   useEffect(() => {
     if (!address) return;
     setLoadingOld(true);
-    findRepSolanaPassportForWallet(address)
-      .then((current) => {
-        // In a full implementation, we'd fetch all historical mints from DAS
-        // For MVP, we just show the current one and allow burning old ones
-        setOldPassports(current ? [current] : []);
+    findAllRepSolanaPassports(address)
+      .then((allPassports) => {
+        setOldPassports(allPassports);
       })
       .catch(() => setOldPassports([]))
       .finally(() => setLoadingOld(false));

@@ -296,6 +296,51 @@ export function parseScoreFromAsset(
  *      (within a single tree, leaf_id is monotonically increasing →
  *      effectively a mint timestamp).
  */
+/**
+ * Fetch ALL RepSolana passports for a wallet (for burning old mints).
+ */
+export async function findAllRepSolanaPassports(
+  walletAddress: string,
+): Promise<VerifiedPassport[]> {
+  const result = await getAssetsByOwner(walletAddress, 1, 100);
+  let candidates = result.items.filter(isRepSolanaPassport);
+  if (candidates.length === 0) return [];
+
+  // Return all passports (sorted by leaf_id descending = newest first)
+  const verified: VerifiedPassport[] = [];
+  for (const asset of candidates) {
+    try {
+      let json: PassportJsonShape | null = null;
+      if (asset.content?.json_uri && /^https?:\/\//.test(asset.content.json_uri)) {
+        const r = await fetch(asset.content.json_uri, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+        });
+        const ct = r.headers.get("content-type") ?? "";
+        if (r.ok && /json/i.test(ct)) {
+          json = (await r.json()) as PassportJsonShape;
+        }
+      }
+      const collection = asset.grouping?.find((g) => g.group_key === "collection")?.group_value ?? null;
+      verified.push({
+        asset,
+        json,
+        assetId: asset.id,
+        owner: asset.ownership?.owner,
+        merkleTree: asset.compression?.tree,
+        collectionMint: collection,
+        isFrozen: Boolean(asset.ownership?.frozen),
+        isCompressed: Boolean(asset.compression?.compressed),
+      });
+    } catch {
+      // Skip assets that fail parsing
+    }
+  }
+  // Sort by leaf_id descending (newest first)
+  verified.sort((a, b) => (b.asset.compression?.leaf_id ?? 0) - (a.asset.compression?.leaf_id ?? 0));
+  return verified;
+}
+
 export async function findRepSolanaPassportForWallet(
   walletAddress: string,
   expected?: { collectionMint?: string; merkleTree?: string },

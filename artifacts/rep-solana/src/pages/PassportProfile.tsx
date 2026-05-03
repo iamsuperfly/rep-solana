@@ -42,7 +42,7 @@ export function PassportProfilePage() {
 
   const validAddress = useValidatedAddress(address);
   const passport = usePassport(validAddress);
-  const network = passport?.network ?? "devnet";
+  const network = passport?.network ?? "mainnet-beta";
   const { data, loading, error } = useReputation(validAddress, network);
   const [copied, setCopied] = useState(false);
 

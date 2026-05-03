@@ -5,8 +5,8 @@
  * passport owner with an attached memo. The signature is stored on the
  * passport so anyone viewing the profile can verify the endorsement.
  *
- * Defaults to devnet so reviewers can test without spending mainnet SOL.
- * Users can flip to mainnet if they want a real on-chain endorsement.
+ * Defaults to mainnet-beta for real on-chain endorsements.
+ * Devnet endorsements available only when viewing devnet passports.
  */
 import { useState } from "react";
 import {
@@ -32,8 +32,10 @@ import {
 import { addEndorsement, type Endorsement } from "@/lib/passport";
 import { useToast } from "@/hooks/use-toast";
 import { Heart, Loader2 } from "lucide-react";
+import { useReputation } from "@/hooks/use-reputation";
 
 const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+const ENDORSE_MIN_SCORE = 50;
 
 export function EndorseDialog({
   recipientAddress,
@@ -45,12 +47,15 @@ export function EndorseDialog({
   const { publicKey, sendTransaction, connected } = useWallet();
   const { connection } = useConnection();
   const { toast } = useToast();
+  const { data: endorserProfile } = useReputation(publicKey?.toBase58() ?? null, network);
 
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
   const isSelf = publicKey?.toBase58() === recipientAddress;
+  const endorserScore = endorserProfile?.score.total ?? 0;
+  const canEndorse = connected && !isSelf && endorserScore >= ENDORSE_MIN_SCORE;
 
   async function handleEndorse() {
     if (!publicKey) return;
@@ -86,6 +91,7 @@ export function EndorseDialog({
         txSignature: signature,
         message: message.trim() || undefined,
         ts: Date.now(),
+        fromScore: endorserScore,
       };
       addEndorsement(recipientAddress, endorsement);
 
@@ -164,7 +170,7 @@ export function EndorseDialog({
           </Button>
           <Button
             onClick={handleEndorse}
-            disabled={busy || !connected}
+          disabled={busy || !canEndorse}
             className="bg-gradient-solana text-white border-0 gap-2"
           >
             {busy && <Loader2 className="w-4 h-4 animate-spin" />}
