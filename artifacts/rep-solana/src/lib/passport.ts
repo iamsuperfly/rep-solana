@@ -77,6 +77,7 @@ export interface Endorsement {
   txSignature: string;
   message?: string;
   ts: number;
+  fromScore?: number;
 }
 
 const STORAGE_KEY = "repsolana:passports:v1";
@@ -248,9 +249,76 @@ export function addEndorsement(address: string, e: Endorsement) {
   const store = readStore();
   const p = store[address];
   if (!p) return;
-  p.endorsements = [e, ...p.endorsements].slice(0, 50);
+  const next = p.endorsements.filter((item) => item.from !== e.from);
+  p.endorsements = [e, ...next].slice(0, 50);
   store[address] = p;
   writeStore(store);
+}
+
+export interface LeaderboardEntry {
+  address: string;
+  score: number;
+  endorsementCount: number;
+  endorsementWeight: number;
+  endorsements: Endorsement[];
+  passport: MintedPassport;
+}
+
+export function getLeaderboardEntries(): LeaderboardEntry[] {
+  return listPassports()
+    .map((passport) => {
+      const score = passport.metadata.repsolana.score;
+      const endorsements = passport.endorsements;
+      const endorsementWeight = endorsements.reduce((sum, e) => {
+        const endorserScore = e.fromScore ?? 0;
+        if (endorserScore <= 0) return sum;
+        return sum + endorserScore / 100;
+      }, 0);
+      return {
+        address: passport.address,
+        score,
+        endorsementCount: endorsements.length,
+        endorsementWeight,
+        endorsements,
+        passport,
+      };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.endorsementWeight !== a.endorsementWeight) return b.endorsementWeight - a.endorsementWeight;
+      if (b.endorsementCount !== a.endorsementCount) return b.endorsementCount - a.endorsementCount;
+      return a.address.localeCompare(b.address);
+    });
+}
+
+export interface EndorsementView {
+  received: Array<Endorsement & { fromScore?: number }>;
+  sent: Array<{ to: string; endorsement: Endorsement; recipientScore?: number }>;
+}
+
+export function getEndorsementView(address: string): EndorsementView {
+  const store = readStore();
+  const received: EndorsementView["received"] = [];
+  const sent: EndorsementView["sent"] = [];
+
+  const receivedPassport = store[address];
+  if (receivedPassport) {
+    received.push(...receivedPassport.endorsements);
+  }
+
+  Object.entries(store).forEach(([toAddr, passport]) => {
+    passport.endorsements.forEach((e) => {
+      if (e.from === address) {
+        sent.push({
+          to: toAddr,
+          endorsement: e,
+          recipientScore: store[toAddr]?.metadata.repsolana.score,
+        });
+      }
+    });
+  });
+
+  return { received, sent };
 }
 
 /**

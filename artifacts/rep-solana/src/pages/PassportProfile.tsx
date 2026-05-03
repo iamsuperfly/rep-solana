@@ -27,7 +27,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { ShareOnX } from "@/components/ShareOnX";
-import { scoreTier } from "@/lib/passport";
+import { scoreTier, getEndorsementView } from "@/lib/passport";
+import { getLeaderboardEntries } from "@/lib/passport";
 import { explorerTx, explorerAddress, solscanAsset } from "@/lib/bubblegum";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
@@ -70,6 +71,9 @@ export function PassportProfilePage() {
   const earnedBadgeLabels =
     data?.badges.filter((b) => b.earned).map((b) => b.label) ?? [];
   const tierLabel = data ? scoreTier(data.score.total).label : undefined;
+  const leaderboard = getLeaderboardEntries();
+  const currentRank = leaderboard.findIndex((entry) => entry.address === validAddress) + 1;
+  const endorsementView = getEndorsementView(validAddress);
 
   return (
     <div className="mx-auto max-w-5xl px-4 sm:px-6 py-8 sm:py-12 space-y-6">
@@ -142,6 +146,44 @@ export function PassportProfilePage() {
             </Card>
           )}
 
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Leaderboard</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {currentRank > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  Current rank: #{currentRank} of {leaderboard.length}
+                </div>
+              )}
+              {leaderboard.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No passports minted yet.</div>
+              ) : (
+                <div className="space-y-2">
+                  {leaderboard.slice(0, 10).map((entry, index) => (
+                    <div
+                      key={entry.address}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3"
+                    >
+                      <div>
+                        <div className="font-medium text-sm">
+                          #{index + 1} {shortAddress(entry.address, 6, 6)}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground">
+                          Score {entry.score} · Endorsements {entry.endorsementCount} · Weight{" "}
+                          {entry.endorsementWeight.toFixed(2)}
+                        </div>
+                      </div>
+                      <Button asChild variant="outline" size="sm">
+                        <a href={`/p/${entry.address}`}>View</a>
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {isPrivate && !isOwner ? (
             <Card>
               <CardContent className="p-6 text-center text-sm text-muted-foreground">
@@ -163,18 +205,18 @@ export function PassportProfilePage() {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Endorsements</CardTitle>
+                    <CardTitle className="text-base">Who Endorsed Me</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {!passport || passport.endorsements.length === 0 ? (
+                    {endorsementView.received.length === 0 ? (
                       <div className="text-sm text-muted-foreground py-6 text-center">
                         <Heart className="w-6 h-6 mx-auto mb-2 opacity-40" />
                         No endorsements yet.
-                        {!isOwner && passport && " Be the first."}
+                        {!isOwner && " Be the first."}
                       </div>
                     ) : (
                       <ul className="space-y-3">
-                        {passport.endorsements.map((e) => (
+                        {endorsementView.received.map((e) => (
                           <li
                             key={e.txSignature}
                             className="flex items-start gap-3 text-sm border-b border-border/40 last:border-0 pb-3 last:pb-0"
@@ -182,11 +224,21 @@ export function PassportProfilePage() {
                             <Heart className="w-4 h-4 text-secondary mt-0.5 shrink-0" />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono text-xs">{shortAddress(e.from)}</span>
+                                <Link href={`/p/${e.from}`} className="font-mono text-xs hover:underline">
+                                  {shortAddress(e.from)}
+                                </Link>
                                 <span className="text-xs text-muted-foreground">·</span>
                                 <span className="text-xs text-secondary font-semibold">
                                   +{e.amountSol} SOL
                                 </span>
+                                {e.fromScore !== undefined && (
+                                  <>
+                                    <span className="text-xs text-muted-foreground">·</span>
+                                    <span className="text-xs text-primary font-semibold">
+                                      Endorser score: {e.fromScore}
+                                    </span>
+                                  </>
+                                )}
                                 <span className="text-xs text-muted-foreground">{timeAgo(e.ts / 1000)}</span>
                               </div>
                               {e.message && (
@@ -194,7 +246,7 @@ export function PassportProfilePage() {
                               )}
                               <a
                                 href={`https://solscan.io/tx/${e.txSignature}${
-                                  passport.network === "devnet" ? "?cluster=devnet" : ""
+                                  passport?.network === "devnet" ? "?cluster=devnet" : ""
                                 }`}
                                 target="_blank"
                                 rel="noreferrer"
@@ -209,6 +261,66 @@ export function PassportProfilePage() {
                     )}
                   </CardContent>
                 </Card>
+
+                {isOwner && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Who I've Endorsed</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {endorsementView.sent.length === 0 ? (
+                        <div className="text-sm text-muted-foreground py-6 text-center">
+                          <Heart className="w-6 h-6 mx-auto mb-2 opacity-40" />
+                          You haven't endorsed anyone yet.
+                        </div>
+                      ) : (
+                        <ul className="space-y-3">
+                          {endorsementView.sent.map((item) => (
+                            <li
+                              key={item.endorsement.txSignature}
+                              className="flex items-start gap-3 text-sm border-b border-border/40 last:border-0 pb-3 last:pb-0"
+                            >
+                              <Heart className="w-4 h-4 text-secondary mt-0.5 shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Link href={`/p/${item.to}`} className="font-mono text-xs hover:underline">
+                                    {shortAddress(item.to)}
+                                  </Link>
+                                  <span className="text-xs text-muted-foreground">·</span>
+                                  <span className="text-xs text-secondary font-semibold">
+                                    +{item.endorsement.amountSol} SOL
+                                  </span>
+                                  {item.recipientScore !== undefined && (
+                                    <>
+                                      <span className="text-xs text-muted-foreground">·</span>
+                                      <span className="text-xs text-primary font-semibold">
+                                        Their score: {item.recipientScore}
+                                      </span>
+                                    </>
+                                  )}
+                                  <span className="text-xs text-muted-foreground">{timeAgo(item.endorsement.ts / 1000)}</span>
+                                </div>
+                                {item.endorsement.message && (
+                                  <div className="text-xs text-muted-foreground mt-1">"{item.endorsement.message}"</div>
+                                )}
+                                <a
+                                  href={`https://solscan.io/tx/${item.endorsement.txSignature}${
+                                    passport?.network === "devnet" ? "?cluster=devnet" : ""
+                                  }`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 mt-1"
+                                >
+                                  View tx <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
               </div>
 
               <Card>
