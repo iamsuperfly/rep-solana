@@ -313,13 +313,18 @@ export async function mintRealPassport(
 
 /**
  * Burn an old passport cNFT on-chain using Bubblegum V2 burnV2 instruction.
- * Requires the merkle tree and leaf index to be retrieved from DAS API.
+ * Requires DAS compression data to construct the proof.
  */
 export async function burnPassportOnChain(
   walletAdapter: WalletAdapter,
   merkleTree: string,
   leafIndex: number,
   leafOwner: string,
+  compressionData: {
+    dataHash: Uint8Array;
+    creatorHash: Uint8Array;
+    root: Uint8Array;
+  },
 ): Promise<string> {
   if (!walletAdapter.publicKey) {
     throw new Error("Wallet not connected");
@@ -331,7 +336,11 @@ export async function burnPassportOnChain(
 
   const burnBuilder = burnV2(umi, {
     merkleTree: merkleTreePk,
-    leafIndex: BigInt(leafIndex),
+    root: compressionData.root,
+    index: leafIndex,
+    nonce: leafIndex,
+    dataHash: compressionData.dataHash,
+    creatorHash: compressionData.creatorHash,
     leafOwner: leafOwnerPk,
     leafDelegate: leafOwnerPk,
   });

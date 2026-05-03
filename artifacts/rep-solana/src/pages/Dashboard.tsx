@@ -15,8 +15,8 @@ import { explorerTx, solscanAsset, burnPassportOnChain } from "@/lib/bubblegum";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { setPrivacy, markAssetBurned } from "@/lib/passport";
-import { getLeaderboardEntries, findRepSolanaPassportForWallet } from "@/lib/das";
+import { setPrivacy, markAssetBurned, getLeaderboardEntries } from "@/lib/passport";
+import { findRepSolanaPassportForWallet } from "@/lib/das";
 import {
   RefreshCcw,
   AlertCircle,
@@ -60,13 +60,21 @@ export function DashboardPage() {
   async function handleBurnPassport(passport: any) {
     if (!connected || !publicKey || !passport) return;
     try {
+      if (!passport.compression) {
+        throw new Error("No compression data available");
+      }
       const burnSig = await burnPassportOnChain(
         { publicKey } as any,
-        passport.merkleTree,
-        passport.compression?.leaf_id ?? 0,
+        passport.compression.tree,
+        passport.compression.leaf_id,
         address!,
+        {
+          dataHash: new Uint8Array(Buffer.from(passport.compression.data_hash, "hex")),
+          creatorHash: new Uint8Array(Buffer.from(passport.compression.creator_hash, "hex")),
+          root: new Uint8Array(Buffer.from(passport.compression.asset_hash, "hex")),
+        },
       );
-      markAssetBurned(passport.assetId || passport.id);
+      markAssetBurned(passport.id);
       toast({
         title: "Passport burned on-chain",
         description: `Signature: ${burnSig.slice(0, 8)}...`,
