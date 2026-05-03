@@ -2,11 +2,22 @@
  * Off-chain metadata builder + free, key-less JSON pinning for the
  * Bubblegum V2 cNFT `uri` field.
  *
- * For the hackathon we host the JSON on jsonblob.com's anonymous public
- * endpoint (CORS-enabled, no API key, returns a stable URL). If that
- * call fails (e.g. CORS in some browsers, rate limit) we fall back to
- * embedding the metadata as a data URI — the on-chain mint still
- * succeeds and the assertion is still verifiable on Explorer.
+ * Metadata upload strategy:
+ *   We use jsonblob.com's anonymous, key-less, CORS-enabled JSON store.
+ *
+ *   IMPORTANT — why we use PUT (not POST):
+ *   jsonblob.com's POST endpoint creates a blob and returns its URL via
+ *   the `Location` response header. However jsonblob.com does NOT include
+ *   `Access-Control-Expose-Headers: Location` in its CORS response, so
+ *   the browser's fetch() silently hides that header from JavaScript —
+ *   `res.headers.get("Location")` always returns null in a browser
+ *   context. The upload succeeds but the code can never read the URL,
+ *   causing the fallback to fire on every mint.
+ *
+ *   Fix: use PUT /api/jsonBlob/:id with a client-generated UUID. We
+ *   choose the ID ourselves so we know the URL before the request fires —
+ *   no response headers needed. GET /api/jsonBlob/:id returns the blob
+ *   as application/json, which Helius and wallet apps can fetch correctly.
  *
  * Image strategy:
  *   The cNFT `image` field points to the single static collection image
@@ -166,15 +177,23 @@ export function buildOnChainMetadata(
   };
 }
 
-/** Try jsonblob.com first; fall back to a data: URI if that fails. */
+/**
+ * Upload metadata JSON to jsonblob.com using PUT with a client-generated
+ * UUID so we know the final URL upfront — no response headers needed.
+ *
+ * Background: jsonblob.com's POST endpoint returns the blob URL via the
+ * `Location` header, but that header is not CORS-exposed to browsers
+ * (no `Access-Control-Expose-Headers: Location`), so `fetch()` always
+ * returns null for it. PUT to a self-chosen UUID sidesteps this entirely.
+ */
 export async function uploadMetadataJSON(
   metadata: OnChainPassportMetadata,
 ): Promise<string> {
-  // jsonblob.com — anonymous, key-less, CORS-enabled JSON pinning.
-  // We POST and read the `Location` header for the canonical URL.
   try {
-    const res = await fetch("https://jsonblob.com/api/jsonBlob", {
-      method: "POST",
+    const id = crypto.randomUUID();
+    const url = `https://jsonblob.com/api/jsonBlob/${id}`;
+    const res = await fetch(url, {
+      method: "PUT",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -182,16 +201,11 @@ export async function uploadMetadataJSON(
       body: JSON.stringify(metadata),
     });
     if (res.ok) {
-      const loc = res.headers.get("Location");
-      if (loc && loc.length <= 200) {
-        // Some browsers return a relative URL — normalise to absolute.
-        return loc.startsWith("http")
-          ? loc
-          : `https://jsonblob.com${loc}`;
-      }
+      return url;
     }
+    console.warn("jsonblob.com PUT failed with status:", res.status);
   } catch (err) {
-    console.warn("jsonblob.com upload failed, falling back:", err);
+    console.warn("jsonblob.com upload failed:", err);
   }
 
   // Fallback: external_url itself. Won't auto-render rich indexer
