@@ -35,7 +35,7 @@ import { useToast } from "@/hooks/use-toast";
 export function DashboardPage() {
   const { publicKey, connected } = useWallet();
   const address = publicKey?.toBase58() ?? null;
-  const { data, loading, error, refresh } = useReputation(address, "devnet");
+  const { data, loading, error, refresh } = useReputation(address, "mainnet-beta");
   const passport = usePassport(address);
   const [oldPassports, setOldPassports] = useState<any[]>([]);
   const [loadingOld, setLoadingOld] = useState(false);
