@@ -59,11 +59,7 @@ function buildTweetText(opts: ShareOnXProps): string {
     const top = opts.badges.slice(0, 3).join(" · ");
     parts.push(`Badges earned: ${top}`);
   }
-  parts.push(
-    opts.shareKind === "verify"
-      ? "Verify it independently:"
-      : "View / verify the soulbound cNFT:",
-  );
+  parts.push("Check yours: https://rep-solana.vercel.app/");
   return parts.join("\n");
 }
 
