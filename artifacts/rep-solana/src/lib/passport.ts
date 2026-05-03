@@ -246,31 +246,34 @@ export function setPrivacy(address: string, privacy: "public" | "private") {
 }
 
 /**
- * Burn (delete) all passports for an address EXCEPT the most recently minted one.
- * Useful when you've refreshed your passport and want to clean up old mints.
+ * Track a burned passport to prevent re-discovering it from DAS.
+ * Stores the assetId of burned cNFTs locally.
  */
-export function burnOlderPassports(address: string): string[] {
-  const store = readStore();
-  const currentPassports = store[address];
-  if (!currentPassports) return [];
+const BURNED_KEY = "repsolana:burned-assets:v1";
 
-  // All mints in the system for this address would come from listening to storage events,
-  // but for MVP we just keep one per address. This is a placeholder for future on-chain burns.
-  // For now, we just document that the latest passport is kept.
-  return [];
+export function markAssetBurned(assetId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const burned = new Set<string>(
+      JSON.parse(window.localStorage.getItem(BURNED_KEY) || "[]"),
+    );
+    burned.add(assetId);
+    window.localStorage.setItem(BURNED_KEY, JSON.stringify(Array.from(burned)));
+  } catch {
+    // Silently fail
+  }
 }
 
-/**
- * Delete a specific passport by its ID.
- */
-export function deletePassportById(address: string, passportId: string): boolean {
-  const store = readStore();
-  const p = store[address];
-  if (!p || p.id !== passportId) return false;
-
-  delete store[address];
-  writeStore(store);
-  return true;
+export function isBurned(assetId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const burned = new Set<string>(
+      JSON.parse(window.localStorage.getItem(BURNED_KEY) || "[]"),
+    );
+    return burned.has(assetId);
+  } catch {
+    return false;
+  }
 }
 
 export function addEndorsement(address: string, e: Endorsement) {

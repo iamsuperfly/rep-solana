@@ -28,6 +28,7 @@ import {
   mintV2,
   parseLeafFromMintV2Transaction,
   findLeafAssetIdPda,
+  burnV2,
   TokenStandard,
   verifyCollection,
 } from "@metaplex-foundation/mpl-bubblegum";
@@ -308,6 +309,38 @@ export async function mintRealPassport(
     merkleTree: cfg.merkleTree,
     network: "devnet",
   };
+}
+
+/**
+ * Burn an old passport cNFT on-chain using Bubblegum V2 burnV2 instruction.
+ * Requires the merkle tree and leaf index to be retrieved from DAS API.
+ */
+export async function burnPassportOnChain(
+  walletAdapter: WalletAdapter,
+  merkleTree: string,
+  leafIndex: number,
+  leafOwner: string,
+): Promise<string> {
+  if (!walletAdapter.publicKey) {
+    throw new Error("Wallet not connected");
+  }
+
+  const umi = buildUmi(walletAdapter);
+  const merkleTreePk = toPublicKey(merkleTree);
+  const leafOwnerPk = toPublicKey(leafOwner);
+
+  const burnBuilder = burnV2(umi, {
+    merkleTree: merkleTreePk,
+    leafIndex: BigInt(leafIndex),
+    leafOwner: leafOwnerPk,
+    leafDelegate: leafOwnerPk,
+  });
+
+  const burnRes = await burnBuilder.sendAndConfirm(umi, {
+    confirm: { commitment: "confirmed" },
+  });
+
+  return base58.deserialize(burnRes.signature)[0];
 }
 
 async function parseLeafWithRetry(

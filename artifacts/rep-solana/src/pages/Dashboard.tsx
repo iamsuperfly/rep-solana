@@ -11,11 +11,12 @@ import { CollateralDemo } from "@/components/CollateralDemo";
 import { MintPassportButton } from "@/components/MintPassportButton";
 import { DevnetSetupCard } from "@/components/DevnetSetupCard";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
-import { explorerTx, solscanAsset } from "@/lib/bubblegum";
+import { explorerTx, solscanAsset, burnPassportOnChain } from "@/lib/bubblegum";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { setPrivacy } from "@/lib/passport";
+import { setPrivacy, markAssetBurned } from "@/lib/passport";
+import { getLeaderboardEntries, findRepSolanaPassportForWallet } from "@/lib/das";
 import {
   RefreshCcw,
   AlertCircle,
@@ -24,18 +25,62 @@ import {
   EyeOff,
   Share2,
   ExternalLink,
+  Trash2,
+  Loader2,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 
 export function DashboardPage() {
   const { publicKey, connected } = useWallet();
   const address = publicKey?.toBase58() ?? null;
-  const { data, loading, error, refresh } = useReputation(address, "mainnet-beta");
+  const { data, loading, error, refresh } = useReputation(address, "devnet");
   const passport = usePassport(address);
+  const [oldPassports, setOldPassports] = useState<any[]>([]);
+  const [loadingOld, setLoadingOld] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { toast } = useToast();
+  const leaderboard = getLeaderboardEntries();
+
+  // Load old passports from DAS for burning
+  useEffect(() => {
+    if (!address) return;
+    setLoadingOld(true);
+    findRepSolanaPassportForWallet(address)
+      .then((current) => {
+        // In a full implementation, we'd fetch all historical mints from DAS
+        // For MVP, we just show the current one and allow burning old ones
+        setOldPassports(current ? [current] : []);
+      })
+      .catch(() => setOldPassports([]))
+      .finally(() => setLoadingOld(false));
+  }, [address]);
+
+  async function handleBurnPassport(passport: any) {
+    if (!connected || !publicKey || !passport) return;
+    try {
+      const burnSig = await burnPassportOnChain(
+        { publicKey } as any,
+        passport.merkleTree,
+        passport.compression?.leaf_id ?? 0,
+        address!,
+      );
+      markAssetBurned(passport.assetId || passport.id);
+      toast({
+        title: "Passport burned on-chain",
+        description: `Signature: ${burnSig.slice(0, 8)}...`,
+      });
+      setOldPassports((prev) => prev.filter((p) => p.id !== passport.id));
+    } catch (err) {
+      const e = err as Error;
+      toast({
+        title: "Burn failed",
+        description: e.message ?? "Could not burn passport",
+        variant: "destructive",
+      });
+    }
+  }
 
   if (!connected || !address) {
     return (
@@ -197,6 +242,74 @@ export function DashboardPage() {
             </CardHeader>
             <CardContent>
               <BadgeGrid badges={data.badges} />
+            </CardContent>
+          </Card>
+
+          {oldPassports.length > 0 && (
+            <Card className="border-amber-500/40 bg-amber-500/5">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Trash2 className="w-4 h-4 text-amber-600" />
+                  Burn Old Passports
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Found {oldPassports.length} passport(s) on-chain. Burn old mints to clean up your collection.
+                </p>
+                {oldPassports.map((p, i) => (
+                  <div
+                    key={p.id || i}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3"
+                  >
+                    <div className="text-xs">
+                      <div className="font-mono">{p.assetId?.slice(0, 12) || p.id?.slice(0, 12)}...</div>
+                      <div className="text-[11px] text-muted-foreground mt-1">
+                        {p.compression?.leaf_id !== undefined ? `Leaf ${p.compression.leaf_id}` : "On-chain"}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleBurnPassport(p)}
+                      className="gap-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Burn
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="flex-row items-center justify-between">
+              <CardTitle className="text-base">Leaderboard</CardTitle>
+              <span className="text-xs text-muted-foreground">
+                Ranked by score, endorsement weight, and count
+              </span>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {leaderboard.slice(0, 10).map((entry, index) => (
+                <div
+                  key={entry.address}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3"
+                >
+                  <div>
+                    <div className="font-medium text-sm">
+                      #{index + 1} {entry.address === address ? "You" : entry.address.slice(0, 4) + "…" + entry.address.slice(-4)}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      Score {entry.score} · Endorsements {entry.endorsementCount} · Weight{" "}
+                      {entry.endorsementWeight.toFixed(2)}
+                    </div>
+                  </div>
+                  <Link href={`/p/${entry.address}`} className="text-xs text-secondary hover:underline">
+                    View profile
+                  </Link>
+                </div>
+              ))}
             </CardContent>
           </Card>
 
