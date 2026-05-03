@@ -29,6 +29,7 @@ import {
   parseLeafFromMintV2Transaction,
   findLeafAssetIdPda,
   TokenStandard,
+  verifyCollection,
 } from "@metaplex-foundation/mpl-bubblegum";
 import {
   mplCore,
@@ -69,10 +70,12 @@ export function buildUmi(walletAdapter: WalletAdapter): Umi {
 // ---------------------------------------------------------------------------
 
 export interface DevnetCollectionConfig {
-  owner: string;            // wallet that initialised
-  collectionMint: string;   // Core collection address
-  merkleTree: string;       // Bubblegum merkle tree address
+  owner: string;
+  collectionMint: string;
+  merkleTree: string;
   createdAt: number;
+  verifiedCollectionAt?: number;
+  verifiedCollectionSignature?: string;
 }
 
 const CONFIG_KEY = "repsolana:devnet-config:v1";
@@ -103,6 +106,45 @@ export function clearDevnetConfig(owner: string) {
   writeConfigStore(store);
 }
 
+/* TODO: Implement verifyDevnetCollection using correct verifyCollection API
+export async function verifyDevnetCollection(
+  walletAdapter: WalletAdapter,
+): Promise<string> {
+  if (!walletAdapter.publicKey) {
+    throw new Error("Wallet not connected");
+  }
+  const umi = buildUmi(walletAdapter);
+  const owner = walletAdapter.publicKey.toBase58();
+  const cfg = getDevnetConfig(owner);
+  if (!cfg) {
+    throw new Error("Devnet collection + tree not initialised yet. Run setup first.");
+  }
+  if (cfg.verifiedCollectionSignature) {
+    return cfg.verifiedCollectionSignature;
+  }
+  const collectionPk = toPublicKey(cfg.collectionMint);
+  const merkleTreePk = toPublicKey(cfg.merkleTree);
+  // TODO: verifyCollection signature requires metadata, nonce, root, index
+  // const tx = await verifyCollection(umi, {
+  //   leafOwner: toPublicKey(owner),
+  //   merkleTree: merkleTreePk,
+  //   collectionMint: collectionPk,
+  // }).sendAndConfirm(umi, {
+  //   confirm: { commitment: "confirmed" },
+  // });
+  // const signature = base58.deserialize(tx.signature)[0];
+  // const store = readConfigStore();
+  // store[owner] = {
+  //   ...cfg,
+  //   verifiedCollectionAt: Date.now(),
+  //   verifiedCollectionSignature: signature,
+  // };
+  // writeConfigStore(store);
+  // return signature;
+  throw new Error("verifyDevnetCollection not yet implemented");
+}
+*/
+
 // ---------------------------------------------------------------------------
 // Initialize: Core collection (PermanentFreezeDelegate) + Bubblegum tree
 // ---------------------------------------------------------------------------
@@ -132,16 +174,6 @@ export async function initializeDevnetCollection(
   const umi = buildUmi(walletAdapter);
   const owner = walletAdapter.publicKey.toBase58();
 
-  // 1) Create the Core collection with two collection-level plugins:
-  //
-  //    a) `BubblegumV2`  ─ REQUIRED. Marks this Core collection as a valid
-  //       Bubblegum V2 collection so `mintV2(coreCollection: ...)` is
-  //       accepted. Without it, mintV2 reverts with 0x17a1
-  //       ("Core collections must have the Bubblegum V2 plugin").
-  //
-  //    b) `PermanentFreezeDelegate` (frozen=true) ─ enforces soulbound:
-  //       every cNFT minted into the collection inherits the freeze →
-  //       transfer instructions revert at the collection level.
   const collectionSigner = generateSigner(umi);
   const collectionTxBuilder = createCollection(umi, {
     collection: collectionSigner,
@@ -157,7 +189,6 @@ export async function initializeDevnetCollection(
     confirm: { commitment: "confirmed" },
   });
 
-  // 2) Create the Bubblegum V2 merkle tree.
   const merkleTreeSigner = generateSigner(umi);
   const treeBuilder = await createTreeV2(umi, {
     merkleTree: merkleTreeSigner,
@@ -192,10 +223,10 @@ export async function initializeDevnetCollection(
 // ---------------------------------------------------------------------------
 
 export interface MintResult {
-  assetId: string;             // cNFT asset id (PDA)
-  mintSignature: string;       // mintV2 tx signature
-  freezeSignature?: string;    // optional setNonTransferableV2 tx signature
-  metadataUri: string;         // off-chain JSON URL
+  assetId: string;
+  mintSignature: string;
+  freezeSignature?: string;
+  metadataUri: string;
   collectionMint: string;
   merkleTree: string;
   network: "devnet";
@@ -224,23 +255,12 @@ export async function mintRealPassport(
   const collectionPk = toPublicKey(cfg.collectionMint);
   const merkleTreePk = toPublicKey(cfg.merkleTree);
 
-  // 1. Build & upload off-chain metadata JSON.
   const fullMetadata = buildOnChainMetadata(profile, {
     collectionMint: cfg.collectionMint,
     merkleTree: cfg.merkleTree,
   });
   const metadataUri = await uploadMetadataJSON(fullMetadata);
 
-  // 2. mintV2: compressed mint into the Core collection.
-  //
-  // ⚠ Use the pre-computed `fullMetadata.name` — DO NOT rebuild the name
-  // here. `buildOnChainMetadata` already applies the v3 format
-  // `RepSolana #{score} · {tier}` which is verified to fit within
-  // Bubblegum's hard 32-byte MetadataArgsV2.name limit. Rebuilding
-  // a different string here is what caused every previous mint to
-  // produce the old `"RepSolana Passport · {tier}"` v2 format (which
-  // exceeded 32 bytes when the score was appended, so the SDK silently
-  // truncated the score off — making it unrecoverable from chain).
   const ownerPk = toPublicKey(owner);
   const mintBuilder = mintV2(umi, {
     leafOwner: ownerPk,
@@ -273,27 +293,11 @@ export async function mintRealPassport(
   });
   const mintSignature = base58.deserialize(mintRes.signature)[0];
 
-  // 3. Resolve the leaf from the mint tx → derive asset id.
-  //    `parseLeafFromMintV2Transaction` internally calls `getTransaction(sig)`
-  //    and throws "Could not get transaction from signature" if the RPC
-  //    hasn't indexed the tx yet (typical 1–6s lag on public devnet even
-  //    after `sendAndConfirm` returns). We poll with backoff so a brief
-  //    indexing delay no longer surfaces as a "mint failed" toast for an
-  //    already-successful on-chain mint.
   const leaf = await parseLeafWithRetry(umi, mintRes.signature);
   const [assetIdPda] = findLeafAssetIdPda(umi, {
     merkleTree: merkleTreePk,
     leafIndex: leaf.nonce,
   });
-
-  // 4. Soulbound enforcement.
-  //    The Core collection above was created with a `PermanentFreezeDelegate`
-  //    plugin (frozen=true) — every member cNFT is therefore permanently
-  //    non-transferable at the COLLECTION level (transfer instructions revert).
-  //    `setNonTransferableV2` would mark the individual leaf as non-transferable
-  //    too, but it requires fetching the live merkle root + canopy proof from
-  //    the tree state and is purely belt-and-braces; we omit it to keep the
-  //    flow client-only and within tx size limits.
 
   return {
     assetId: assetIdPda.toString(),
@@ -306,15 +310,6 @@ export async function mintRealPassport(
   };
 }
 
-/**
- * Wraps `parseLeafFromMintV2Transaction` in a polling retry loop so a brief
- * RPC indexing lag (the tx is confirmed but `getTransaction` still returns
- * null for a few seconds) doesn't surface as a "mint failed" error.
- *
- * Strategy: 12 attempts over ~12s, exponential-ish backoff capped at 1.5s.
- * If we still can't fetch the tx, throw a clearer message that tells the
- * user the mint actually landed and the app will catch up on refresh.
- */
 async function parseLeafWithRetry(
   umi: Umi,
   signature: Uint8Array,
@@ -323,16 +318,12 @@ async function parseLeafWithRetry(
   let lastErr: unknown;
   for (let i = 0; i < attempts; i += 1) {
     try {
-      // First poll getTransaction directly — cheaper than parseLeaf which
-      // does extra account lookups when the tx exists but is malformed.
       const tx = await umi.rpc.getTransaction(signature);
       if (tx) {
         return await parseLeafFromMintV2Transaction(umi, signature);
       }
     } catch (err) {
       lastErr = err;
-      // If the failure is something other than the tx-not-found case, it
-      // won't recover with more polling — re-throw immediately.
       const msg = (err as Error)?.message ?? "";
       if (!/Could not get transaction|getTransaction|fetch/i.test(msg)) {
         throw err;
@@ -346,10 +337,6 @@ async function parseLeafWithRetry(
       ((lastErr as Error)?.message ?? ""),
   );
 }
-
-// ---------------------------------------------------------------------------
-// Devnet airdrop helper — judges can fund a fresh wallet in one click
-// ---------------------------------------------------------------------------
 
 export async function requestDevnetAirdrop(
   walletAdapter: WalletAdapter,
@@ -365,19 +352,11 @@ export async function requestDevnetAirdrop(
   return "ok";
 }
 
-// ---------------------------------------------------------------------------
-// Devnet SOL balance helper
-// ---------------------------------------------------------------------------
-
 export async function getDevnetBalance(address: string): Promise<number> {
   const umi = createUmi(getDevnetRpcUrl());
   const lamports = await umi.rpc.getBalance(toPublicKey(address));
   return Number(lamports.basisPoints) / 1e9;
 }
-
-// ---------------------------------------------------------------------------
-// Explorer helpers
-// ---------------------------------------------------------------------------
 
 export function explorerTx(sig: string, network: "devnet" | "mainnet-beta" = "devnet") {
   const cluster = network === "devnet" ? "?cluster=devnet" : "";

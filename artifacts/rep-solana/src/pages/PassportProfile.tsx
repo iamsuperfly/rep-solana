@@ -3,7 +3,7 @@
  * URL: /p/<wallet-address>
  */
 import { useEffect, useState } from "react";
-import { useRoute, useLocation } from "wouter";
+import { useRoute, useLocation, Link } from "wouter";
 import { useReputation } from "@/hooks/use-reputation";
 import { usePassport } from "@/hooks/use-passport";
 import { PassportCard } from "@/components/PassportCard";
