@@ -40,6 +40,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge as UIBadge } from "@/components/ui/badge";
 import { ShareOnX } from "@/components/ShareOnX";
 import { ScoreGauge } from "@/components/ScoreGauge";
+import { EndorseDialog } from "@/components/EndorseDialog";
 
 import { explorerAddress, explorerTx, solscanAsset } from "@/lib/bubblegum";
 import {
@@ -307,7 +308,7 @@ function VerifyResult({
                 <GuaranteePill icon={<Sparkles className="w-3 h-3" />} label="Compressed (Bubblegum V2)" ok={data.isCompressed} />
                 <GuaranteePill icon={<Lock className="w-3 h-3" />} label="Owner match" ok={isMatchingOwner} />
               </div>
-              <div className="mt-5 flex items-center gap-2 justify-center sm:justify-start">
+              <div className="mt-5 flex items-center gap-2 justify-center sm:justify-start flex-wrap">
                 <ShareOnX
                   address={wallet}
                   score={score ?? undefined}
@@ -315,6 +316,7 @@ function VerifyResult({
                   badges={badges}
                   shareKind="verify"
                 />
+                <EndorseDialog recipientAddress={wallet} network="devnet" />
               </div>
             </div>
           </div>

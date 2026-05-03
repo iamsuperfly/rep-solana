@@ -245,6 +245,34 @@ export function setPrivacy(address: string, privacy: "public" | "private") {
   writeStore(store);
 }
 
+/**
+ * Burn (delete) all passports for an address EXCEPT the most recently minted one.
+ * Useful when you've refreshed your passport and want to clean up old mints.
+ */
+export function burnOlderPassports(address: string): string[] {
+  const store = readStore();
+  const currentPassports = store[address];
+  if (!currentPassports) return [];
+
+  // All mints in the system for this address would come from listening to storage events,
+  // but for MVP we just keep one per address. This is a placeholder for future on-chain burns.
+  // For now, we just document that the latest passport is kept.
+  return [];
+}
+
+/**
+ * Delete a specific passport by its ID.
+ */
+export function deletePassportById(address: string, passportId: string): boolean {
+  const store = readStore();
+  const p = store[address];
+  if (!p || p.id !== passportId) return false;
+
+  delete store[address];
+  writeStore(store);
+  return true;
+}
+
 export function addEndorsement(address: string, e: Endorsement) {
   const store = readStore();
   const p = store[address];

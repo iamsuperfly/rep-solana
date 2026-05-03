@@ -41,8 +41,9 @@ export function PassportProfilePage() {
   const { publicKey } = useWallet();
 
   const validAddress = useValidatedAddress(address);
-  const { data, loading, error } = useReputation(validAddress, "mainnet-beta");
   const passport = usePassport(validAddress);
+  const network = passport?.network ?? "devnet";
+  const { data, loading, error } = useReputation(validAddress, network);
   const [copied, setCopied] = useState(false);
 
   if (!address || !validAddress) {
