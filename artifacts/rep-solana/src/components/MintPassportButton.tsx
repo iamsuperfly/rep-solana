@@ -507,6 +507,12 @@ export function MintPassportButton({
   const needsUpdate = !liveLoading && absDelta > UPDATE_THRESHOLD;
 
   if (!needsUpdate) {
+    // Detect pre-fix passports: DAS hydration writes the real on-chain URI
+    // into existing.cnft.metadataUri. If it does not contain /api/meta it
+    // was minted before the metadata fix and wallets will show a blank image.
+    const storedUri = existing?.cnft?.metadataUri ?? '';
+    const hasBrokenUri = Boolean(storedUri) && !storedUri.includes('/api/meta');
+
     return (
       <div className="space-y-2 w-full">
         <Button
@@ -531,6 +537,34 @@ export function MintPassportButton({
             </>
           )}
         </p>
+
+        {hasBrokenUri && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+            <p className="text-[11px] text-amber-400 font-semibold">
+              Image not showing in Phantom / Backpack?
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              Your passport was minted before a metadata fix — the old URI
+              points at the app&apos;s HTML page instead of JSON, so wallets
+              show a blank image. Re-mint once (tiny SOL fee) to bake the
+              correct <span className="font-mono">/api/meta</span> URL into
+              the cNFT leaf.
+            </p>
+            <Button
+              size="sm"
+              onClick={handleMint}
+              disabled={!wallet.connected || busy}
+              className="bg-amber-500 hover:bg-amber-400 text-black font-semibold gap-2 w-full"
+            >
+              {busy ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="w-4 h-4" />
+              )}
+              {busy ? 'Re-minting…' : 'Re-mint to fix wallet image'}
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
