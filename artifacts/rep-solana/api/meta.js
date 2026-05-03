@@ -1,21 +1,17 @@
 /**
- * Vercel Edge Runtime function: GET /api/meta?a=<address>&s=<score>&t=<tier>
+ * Vercel Edge function: GET /api/meta?a=<address>&s=<score>&t=<tier>
  *
- * Generates Metaplex-compatible NFT metadata JSON on the fly.
- * Used as the cNFT metadata URI so wallets and Helius can fetch it
- * without any external service, upload step, or CORS gymnastics.
+ * Plain JavaScript — no TypeScript compilation, no type errors, no "Emit skipped".
+ * Vercel routes .js files through esbuild directly, skipping tsc entirely.
  *
- * Uses the Vercel Edge Runtime (web standard Request/Response) so there
- * are no Node.js type imports — no build errors, no compatibility issues.
- *
- * URL baked into the cNFT leaf (example):
- *   https://rep-solana.vercel.app/api/meta?a=7D4r...&s=72&t=Trusted
- * Length: ~110 chars max — well within Bubblegum's 200-byte URI limit.
+ * Returns Metaplex-compatible NFT metadata JSON on the fly.
+ * This URL is baked into the cNFT leaf at mint time so wallets and Helius
+ * always fetch clean JSON instead of the SPA HTML page.
  */
 
 export const config = { runtime: "edge" };
 
-export default function handler(req: Request): Response {
+export default function handler(req) {
   const url = new URL(req.url);
 
   const address = url.searchParams.get("a") ?? "";
@@ -40,8 +36,8 @@ export default function handler(req: Request): Response {
     symbol: "REPSOL",
     description:
       "Soulbound, compressed reputation passport on Solana. " +
-      "Score and tier are derived from on-chain activity at mint time. " +
-      "Non-transferable: enforced via Metaplex Bubblegum V2 + Core PermanentFreezeDelegate.",
+      "Score and tier reflect on-chain activity at mint time. " +
+      "Non-transferable via Metaplex Bubblegum V2 + PermanentFreezeDelegate.",
     image: imageUrl,
     external_url: `${origin}/p/${address}`,
     attributes: [
