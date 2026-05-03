@@ -42,8 +42,9 @@ export function PassportProfilePage() {
 
   const validAddress = useValidatedAddress(address);
   const passport = usePassport(validAddress);
-  const network = passport?.network ?? "mainnet-beta";
-  const { data, loading, error } = useReputation(validAddress, network);
+  // Reputation data always lives on mainnet-beta (tx history, score, badges).
+  // passport.network only records where the cNFT was minted — separate concern.
+  const { data, loading, error } = useReputation(validAddress, "mainnet-beta");
   const [copied, setCopied] = useState(false);
 
   if (!address || !validAddress) {

@@ -58,18 +58,20 @@ export function DashboardPage() {
   async function handleBurnPassport(passport: any) {
     if (!connected || !publicKey || !passport) return;
     try {
-      if (!passport.compression) {
-        throw new Error("No compression data available");
+      // VerifiedPassport stores compression data inside `.asset.compression`
+      const compression = passport.asset?.compression;
+      if (!compression) {
+        throw new Error("No compression data available — DAS may not have indexed this asset yet");
       }
       const burnSig = await burnPassportOnChain(
         { publicKey } as any,
-        passport.compression.tree,
-        passport.compression.leaf_id,
+        compression.tree,
+        compression.leaf_id,
         address!,
         {
-          dataHash: new Uint8Array(Buffer.from(passport.compression.data_hash, "hex")),
-          creatorHash: new Uint8Array(Buffer.from(passport.compression.creator_hash, "hex")),
-          root: new Uint8Array(Buffer.from(passport.compression.asset_hash, "hex")),
+          dataHash: new Uint8Array(Buffer.from(compression.data_hash.replace(/^0x/, ""), "hex")),
+          creatorHash: new Uint8Array(Buffer.from(compression.creator_hash.replace(/^0x/, ""), "hex")),
+          root: new Uint8Array(Buffer.from(compression.asset_hash.replace(/^0x/, ""), "hex")),
         },
       );
       markAssetBurned(passport.id);

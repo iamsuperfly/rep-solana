@@ -47,7 +47,9 @@ export function EndorseDialog({
   const { publicKey, sendTransaction, connected } = useWallet();
   const { connection } = useConnection();
   const { toast } = useToast();
-  const { data: endorserProfile } = useReputation(publicKey?.toBase58() ?? null, network);
+  // Always fetch score from mainnet-beta — that's where real on-chain history lives.
+  // The TX itself goes to whatever cluster the wallet is connected to (devnet for hackathon).
+  const { data: endorserProfile } = useReputation(publicKey?.toBase58() ?? null, "mainnet-beta");
 
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
