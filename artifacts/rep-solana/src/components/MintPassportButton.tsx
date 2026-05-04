@@ -8,26 +8,15 @@
  *
  * UX states (in order):
  *   1. DAS round-trip in flight  → "Checking on-chain…" (disabled).
- *   2. No passport on chain, no devnet config locally
- *      → "Setup Soulbound Collection (devnet)" — one-time init.
- *   3. No passport on chain, devnet config exists
- *      → "Mint Soulbound Passport cNFT".
- *   4. Passport on chain, on-chain score ≈ live score
- *      (|delta| ≤ UPDATE_THRESHOLD)
+ *   2. No passport on chain      → "Mint Soulbound Passport cNFT".
+ *   3. Passport on chain, score ≈ live score (|delta| ≤ UPDATE_THRESHOLD)
  *      → disabled "Passport up to date · score N".
- *   5. Passport on chain, on-chain score has drifted from live score
+ *   4. Passport on chain, score has drifted
  *      → "Update Passport to latest score".
  *
- * Scope of "on-chain":
- *   The on-chain score is derived from the cNFT's `name` field (which is
- *   stored in the leaf hash and therefore part of the on-chain
- *   commitment), with the off-chain JSON's `repsolana.score` and the
- *   indexer-populated `Score` attribute as fallbacks. See
- *   `parseScoreFromAsset` in `lib/das.ts`.
- *
- * Fallback when no DAS RPC is configured:
- *   We degrade to the previous localStorage-only flow so the app still
- *   works on plain devnet RPC (e.g. preview without a Helius key).
+ * All mints go into the single official RepSolana collection + Merkle tree.
+ * The one-time "Setup Soulbound Collection" step is no longer needed for
+ * end users — the collection is already live on devnet.
  */
 import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -39,7 +28,6 @@ import {
   type MintedPassport,
 } from "@/lib/passport";
 import {
-  initializeDevnetCollection,
   mintRealPassport,
   getDevnetConfig,
   explorerTx,
@@ -58,7 +46,6 @@ import {
   RefreshCcw,
   ShieldCheck,
   Sparkles,
-  Wrench,
 } from "lucide-react";
 import { useLocation } from "wouter";
 
@@ -69,9 +56,6 @@ const UPDATE_THRESHOLD = 5;
  * sessionStorage cache for the per-wallet DAS lookup. We hit Helius the
  * first time the user visits in a session, then short-cache the answer so
  * tab-switching, route changes and Dashboard re-mounts don't re-spinner.
- * Cache is *only* used to render an instant initial state; we still
- * re-query DAS in the background so manual mints/updates show up
- * within ~one minute without a hard refresh.
  */
 const DAS_CACHE_KEY = "repsolana:das-cache:v1";
 const DAS_CACHE_TTL_MS = 60_000;
@@ -156,19 +140,12 @@ export function MintPassportButton({
   const dasAvailable = hasDasRpc();
   const [, navigate] = useLocation();
 
-  // ── Local-cache state (still used as a fallback when no DAS) ──────────
-  const [cfg, setCfg] = useState<DevnetCollectionConfig | null>(() =>
-    getDevnetConfig(profile.address),
-  );
+  // ── Local-cache state (fallback when no DAS) ──────────────────────────
   const [existing, setExisting] = useState<MintedPassport | null>(() =>
     getPassport(profile.address),
   );
 
   // ── Authoritative on-chain state (source of truth when DAS is up) ─────
-  // `chainScore === null` is meaningful: the asset exists but we couldn't
-  // recover a score from any source (legacy v2 passport whose name got
-  // truncated). The UI offers a Migrate flow in that case rather than
-  // looping the user through false update prompts against a phantom 0.
   const cachedDas = readDasCache(profile.address);
   const [chainScore, setChainScore] = useState<number | null>(
     cachedDas?.score ?? null,
@@ -179,40 +156,24 @@ export function MintPassportButton({
   const [chainAssetId, setChainAssetId] = useState<string | null>(
     cachedDas?.assetId ?? null,
   );
-  // Show the spinner only on a true cold load (no cached DAS answer).
-  // With cache we render the previous answer immediately and refresh in
-  // the background.
   const [hydrating, setHydrating] = useState(dasAvailable && !cachedDas);
 
   // ── Action state ──────────────────────────────────────────────────────
   const [busy, setBusy] = useState(false);
 
-  // Listen for in-app store changes (e.g. setup card or post-mint update).
+  // Listen for in-app store changes (e.g. post-mint update).
   useEffect(() => {
     function refresh() {
-      setCfg(getDevnetConfig(profile.address));
       setExisting(getPassport(profile.address));
     }
     refresh();
-    window.addEventListener("repsolana:devnet-config-changed", refresh);
     window.addEventListener("repsolana:passport-changed", refresh);
     return () => {
-      window.removeEventListener("repsolana:devnet-config-changed", refresh);
       window.removeEventListener("repsolana:passport-changed", refresh);
     };
   }, [profile.address]);
 
-  // ── On-chain hydration: this is the source of truth ────────────────────
-  // Runs whenever the connected wallet changes. We DON'T re-run on every
-  // live-score recompute because that would hammer DAS unnecessarily — the
-  // chain score only changes when the user mints/updates. The cfg is
-  // captured at call-time (not a deps array dep) so we always pass the
-  // freshest collection/tree filter.
-  //
-  // `preferAssetId` is the assetId we OPTIMISTICALLY know about (e.g. just
-  // minted but not yet indexed). If DAS returns a different asset for this
-  // wallet, we treat it as a stale answer and keep the optimistic state
-  // rather than rolling the user back to a pre-mint view.
+  // ── On-chain hydration ─────────────────────────────────────────────────
   async function hydrateFromChain(
     silent = false,
     preferAssetId?: string,
@@ -223,17 +184,12 @@ export function MintPassportButton({
     }
     if (!silent) setHydrating(true);
     try {
-      // Prefer the wallet's own collection/tree from setup if known so we
-      // ignore stale test passports the user minted under a different
-      // collection earlier.
-      const localCfg = getDevnetConfig(profile.address);
+      const cfg = getDevnetConfig(profile.address);
       const found = await findRepSolanaPassportForWallet(profile.address, {
-        collectionMint: localCfg?.collectionMint || undefined,
-        merkleTree: localCfg?.merkleTree || undefined,
+        collectionMint: cfg.collectionMint,
+        merkleTree: cfg.merkleTree,
       });
       if (!found) {
-        // Indexer disagrees with optimistic state — most likely DAS hasn't
-        // caught up to a fresh mint yet. Don't roll back the UI.
         if (preferAssetId) return;
         setChainHasPassport(false);
         setChainScore(null);
@@ -246,8 +202,6 @@ export function MintPassportButton({
         });
         return;
       }
-      // If the caller is awaiting confirmation of a SPECIFIC mint and DAS
-      // returned a different asset, treat the answer as stale.
       if (preferAssetId && found.assetId !== preferAssetId) return;
       const score = parseScoreFromAsset(found.asset, found.json);
       setChainHasPassport(true);
@@ -259,11 +213,7 @@ export function MintPassportButton({
         assetId: found.assetId,
         fetchedAt: Date.now(),
       });
-      // Mirror to localStorage so the profile page renders fully offline.
       persistConfigFromChain(profile.address, found);
-      // We persist with the LATEST KNOWN score: the parsed on-chain value
-      // when available, or the existing cached score (so we don't blow away
-      // a previously-known good score with `0` for legacy passports).
       const cached = getPassport(profile.address);
       const scoreForCache =
         score ?? cached?.metadata.repsolana.score ?? profile.score.total;
@@ -278,51 +228,19 @@ export function MintPassportButton({
           network: "devnet",
           standard: "metaplex-bubblegum-v2",
         },
-        // CRITICAL: this is a chain *discovery*, not a fresh mint. Keep the
-        // original mintedAt/issuedAt so the UI stops flapping the timestamp.
         { preserveTimestamps: true },
       );
     } catch {
-      // DAS errors are non-fatal — fall back to local cache for this render.
-      // Don't reset chainHasPassport here; whatever cached value we showed
-      // is still better than blanking out.
+      // DAS errors are non-fatal — fall back to local cache.
     } finally {
       setHydrating(false);
     }
   }
 
   useEffect(() => {
-    // If we showed cached state instantly, refresh quietly in the background;
-    // otherwise spinner-and-fetch as before.
     void hydrateFromChain(Boolean(cachedDas));
-    // We intentionally only re-run when the wallet changes, not on every
-    // profile recompute — to avoid hammering DAS.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.address, dasAvailable]);
-
-  async function handleInit() {
-    if (!wallet.connected || !wallet.publicKey) {
-      toast({ title: "Connect a wallet first", variant: "destructive" });
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await initializeDevnetCollection(wallet);
-      toast({
-        title: "Soulbound collection ready",
-        description: `Collection ${res.collectionMint.slice(0, 6)}…  ·  Tree ${res.merkleTree.slice(0, 6)}…`,
-      });
-    } catch (err) {
-      const e = err as Error;
-      toast({
-        title: "Setup failed",
-        description: e.message ?? "Try claiming devnet SOL and retry.",
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function handleMint() {
     if (!wallet.connected || !wallet.publicKey) {
@@ -342,8 +260,6 @@ export function MintPassportButton({
         network: "devnet",
         standard: "metaplex-bubblegum-v2",
       });
-      // Optimistically reflect the new on-chain state — we just minted
-      // with the live score, so chain == live until DAS re-indexes.
       setChainHasPassport(true);
       setChainScore(profile.score.total);
       toast({
@@ -362,11 +278,6 @@ export function MintPassportButton({
           </a>
         ) as any,
       });
-      // Re-query DAS in the background to pick up the freshly-minted asset
-      // (gives us the canonical leaf id / asset id from chain). Devnet
-      // indexer lag is often >10s, so we retry a few times silently and
-      // pin the lookup to the just-minted assetId so a stale "old asset
-      // wins" answer never rolls back the optimistic UI.
       const tryAssetId = result.assetId;
       [6_000, 15_000, 30_000].forEach((ms) =>
         window.setTimeout(() => {
@@ -388,9 +299,7 @@ export function MintPassportButton({
 
   // ── Render ──────────────────────────────────────────────────────────────
 
-  // 1) Hydrating — only show when DAS will tell us something authoritative.
-  //    Without a DAS RPC we'd block on a request that never resolves, so we
-  //    skip this state entirely in that case.
+  // 1) Hydrating
   if (dasAvailable && hydrating) {
     return (
       <Button
@@ -406,31 +315,12 @@ export function MintPassportButton({
   }
 
   // ── Decide "do they have a passport?" ──────────────────────────────────
-  // Prefer DAS truth; fall back to localStorage when DAS isn't configured
-  // (or transiently failed and returned `null`).
   const hasPassport =
     chainHasPassport === true ||
     (chainHasPassport === null && Boolean(existing?.cnft));
 
-  // 2/3) No passport on chain → setup or mint flow.
+  // 2) No passport on chain → mint directly into the official collection.
   if (!hasPassport) {
-    if (!cfg) {
-      return (
-        <Button
-          size={size}
-          onClick={handleInit}
-          disabled={!wallet.connected || busy}
-          className="bg-gradient-solana text-white border-0 hover:opacity-90 font-semibold gap-2 shadow-xl glow-purple w-full"
-        >
-          {busy ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <Wrench className="w-5 h-5" />
-          )}
-          {busy ? "Setting up…" : "Setup Soulbound Collection (devnet)"}
-        </Button>
-      );
-    }
     return (
       <Button
         size={size}
@@ -453,11 +343,7 @@ export function MintPassportButton({
     );
   }
 
-  // 4a) Legacy v2 passport on chain — score is unrecoverable because the
-  //     SDK truncated the name at 32 bytes and the original off-chain JSON
-  //     URI points at the SPA HTML. Don't pretend it's `0` (that would
-  //     loop the user through false update prompts forever). Offer an
-  //     explicit one-time Migrate to the v3 `#NN` name format.
+  // 3) Legacy v2 passport — score unrecoverable, offer migrate.
   if (chainScore === null && chainHasPassport === true) {
     return (
       <div className="space-y-2 w-full">
@@ -494,22 +380,14 @@ export function MintPassportButton({
   }
 
   // 4/5) Passport on chain — compare on-chain score vs live score.
-  // Prefer the chain-derived score; fall back to the local cache only when
-  // DAS isn't available at all.
   const onChainScore =
     chainScore ?? existing?.metadata.repsolana.score ?? 0;
   const liveScore = profile.score.total;
   const delta = liveScore - onChainScore;
   const absDelta = Math.abs(delta);
-  // While the parent's reputation hook is still resolving, the live score
-  // reads as 0 → we'd flag a fake (-onChainScore) drift. Suppress the
-  // update prompt entirely until the live profile is loaded.
   const needsUpdate = !liveLoading && absDelta > UPDATE_THRESHOLD;
 
   if (!needsUpdate) {
-    // Detect pre-fix passports: DAS hydration writes the real on-chain URI
-    // into existing.cnft.metadataUri. If it does not contain /api/meta it
-    // was minted before the metadata fix and wallets will show a blank image.
     const storedUri = existing?.cnft?.metadataUri ?? '';
     const hasBrokenUri = Boolean(storedUri) && !storedUri.includes('/api/meta');
 
@@ -591,18 +469,8 @@ export function MintPassportButton({
       </Button>
       <p className="text-[11px] text-muted-foreground text-center">
         On-chain score: <strong>{onChainScore}</strong> · Live score:{" "}
-        <strong>{liveScore}</strong> ·{" "}
-        <span
-          className={
-            delta > 0
-              ? "text-secondary font-semibold"
-              : "text-destructive font-semibold"
-          }
-        >
-          {delta > 0 ? "+" : ""}
-          {delta}
-        </span>{" "}
-        pts drift — re-mint to refresh.
+        <strong>{liveScore}</strong> · {delta > 0 ? "+" : ""}{delta} pts since
+        last mint.
       </p>
     </div>
   );

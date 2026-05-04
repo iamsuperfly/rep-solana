@@ -11,8 +11,8 @@
  *      braces: the leaf flag is flipped on-chain so even the indexer
  *      reports the asset as non-transferable.
  *
- * Per-wallet bookkeeping (collection mint + merkle tree pubkeys) is
- * persisted in localStorage so the "initialize" flow only runs once.
+ * All mints use the single official RepSolana collection + Merkle tree.
+ * The "initialize" flow is no longer exposed to end users.
  */
 
 import {
@@ -48,6 +48,16 @@ import { base58 } from "@metaplex-foundation/umi/serializers";
 import type { ReputationProfile } from "./solana";
 import { buildOnChainMetadata, uploadMetadataJSON } from "./passport-metadata";
 
+// ---------------------------------------------------------------------------
+// Official RepSolana collection — all mints go here, no new trees/collections
+// ---------------------------------------------------------------------------
+
+export const OFFICIAL_COLLECTION_MINT =
+  "6eJ7sWmCv1C5A34cyybQ9sbxP85eK92MjCcpCxBE4x3u";
+
+export const OFFICIAL_MERKLE_TREE =
+  "ECCGjAfZb9Va7NsDKnaVBvnUtGSUsLiopm9bwSM1sjoV";
+
 /** Devnet RPC. Honours VITE_HELIUS_RPC_URL if the user provides one. */
 export function getDevnetRpcUrl(): string {
   const override = (import.meta.env.VITE_HELIUS_RPC_URL as string | undefined) || "";
@@ -67,7 +77,7 @@ export function buildUmi(walletAdapter: WalletAdapter): Umi {
 }
 
 // ---------------------------------------------------------------------------
-// Per-wallet config (collection + tree pubkeys) — survives page reloads
+// Per-wallet config — always returns the official collection + tree
 // ---------------------------------------------------------------------------
 
 export interface DevnetCollectionConfig {
@@ -79,75 +89,27 @@ export interface DevnetCollectionConfig {
   verifiedCollectionSignature?: string;
 }
 
-const CONFIG_KEY = "repsolana:devnet-config:v1";
-
-function readConfigStore(): Record<string, DevnetCollectionConfig> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(CONFIG_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+/**
+ * Always returns the official RepSolana collection config.
+ * No per-wallet initialization needed — all wallets share the same
+ * collection and Merkle tree.
+ */
+export function getDevnetConfig(owner: string): DevnetCollectionConfig {
+  return {
+    owner,
+    collectionMint: OFFICIAL_COLLECTION_MINT,
+    merkleTree: OFFICIAL_MERKLE_TREE,
+    createdAt: 0,
+  };
 }
 
-function writeConfigStore(store: Record<string, DevnetCollectionConfig>) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(CONFIG_KEY, JSON.stringify(store));
-  window.dispatchEvent(new CustomEvent("repsolana:devnet-config-changed"));
+/** No-op: kept for API compatibility. Use getDevnetConfig() — it always returns the official config. */
+export function clearDevnetConfig(_owner: string): void {
+  // No-op: config is now global (official collection), not per-wallet.
 }
-
-export function getDevnetConfig(owner: string): DevnetCollectionConfig | null {
-  return readConfigStore()[owner] ?? null;
-}
-
-export function clearDevnetConfig(owner: string) {
-  const store = readConfigStore();
-  delete store[owner];
-  writeConfigStore(store);
-}
-
-/* TODO: Implement verifyDevnetCollection using correct verifyCollection API
-export async function verifyDevnetCollection(
-  walletAdapter: WalletAdapter,
-): Promise<string> {
-  if (!walletAdapter.publicKey) {
-    throw new Error("Wallet not connected");
-  }
-  const umi = buildUmi(walletAdapter);
-  const owner = walletAdapter.publicKey.toBase58();
-  const cfg = getDevnetConfig(owner);
-  if (!cfg) {
-    throw new Error("Devnet collection + tree not initialised yet. Run setup first.");
-  }
-  if (cfg.verifiedCollectionSignature) {
-    return cfg.verifiedCollectionSignature;
-  }
-  const collectionPk = toPublicKey(cfg.collectionMint);
-  const merkleTreePk = toPublicKey(cfg.merkleTree);
-  // TODO: verifyCollection signature requires metadata, nonce, root, index
-  // const tx = await verifyCollection(umi, {
-  //   leafOwner: toPublicKey(owner),
-  //   merkleTree: merkleTreePk,
-  //   collectionMint: collectionPk,
-  // }).sendAndConfirm(umi, {
-  //   confirm: { commitment: "confirmed" },
-  // });
-  // const signature = base58.deserialize(tx.signature)[0];
-  // const store = readConfigStore();
-  // store[owner] = {
-  //   ...cfg,
-  //   verifiedCollectionAt: Date.now(),
-  //   verifiedCollectionSignature: signature,
-  // };
-  // writeConfigStore(store);
-  // return signature;
-  throw new Error("verifyDevnetCollection not yet implemented");
-}
-*/
 
 // ---------------------------------------------------------------------------
-// Initialize: Core collection (PermanentFreezeDelegate) + Bubblegum tree
+// Initialize: kept for collection-authority use only — not exposed to end users
 // ---------------------------------------------------------------------------
 
 export interface InitResult {
@@ -161,10 +123,9 @@ const TREE_MAX_DEPTH = 5;
 const TREE_MAX_BUFFER = 8;
 
 /**
- * One-time setup. Creates a small (32-leaf) Bubblegum V2 tree and a
- * non-transferable Core collection that the cNFTs will live under.
- *
- * Cost on devnet: ~0.018 SOL all-in. Funded entirely by the wallet.
+ * One-time setup for the collection authority only.
+ * End users should never call this — the official collection + tree are
+ * already created and hardcoded above.
  */
 export async function initializeDevnetCollection(
   walletAdapter: WalletAdapter,
@@ -173,7 +134,6 @@ export async function initializeDevnetCollection(
     throw new Error("Wallet not connected");
   }
   const umi = buildUmi(walletAdapter);
-  const owner = walletAdapter.publicKey.toBase58();
 
   const collectionSigner = generateSigner(umi);
   const collectionTxBuilder = createCollection(umi, {
@@ -201,19 +161,9 @@ export async function initializeDevnetCollection(
     confirm: { commitment: "confirmed" },
   });
 
-  const cfg: DevnetCollectionConfig = {
-    owner,
+  return {
     collectionMint: collectionSigner.publicKey,
     merkleTree: merkleTreeSigner.publicKey,
-    createdAt: Date.now(),
-  };
-  const store = readConfigStore();
-  store[owner] = cfg;
-  writeConfigStore(store);
-
-  return {
-    collectionMint: cfg.collectionMint,
-    merkleTree: cfg.merkleTree,
     collectionSignature: base58.deserialize(collectionRes.signature)[0],
     treeSignature: base58.deserialize(treeRes.signature)[0],
   };
@@ -235,7 +185,7 @@ export interface MintResult {
 
 /**
  * Mint the user's RepSolana passport as a real, on-chain, compressed,
- * soulbound NFT in their pre-initialized devnet collection + tree.
+ * soulbound NFT into the official RepSolana collection + Merkle tree.
  */
 export async function mintRealPassport(
   walletAdapter: WalletAdapter,
@@ -245,20 +195,18 @@ export async function mintRealPassport(
     throw new Error("Wallet not connected");
   }
   const owner = walletAdapter.publicKey.toBase58();
-  const cfg = getDevnetConfig(owner);
-  if (!cfg) {
-    throw new Error(
-      "Devnet collection + tree not initialised yet. Run setup first.",
-    );
-  }
+
+  // Always use the official collection + tree — no per-wallet config needed.
+  const collectionMintAddr = OFFICIAL_COLLECTION_MINT;
+  const merkleTreeAddr = OFFICIAL_MERKLE_TREE;
 
   const umi = buildUmi(walletAdapter);
-  const collectionPk = toPublicKey(cfg.collectionMint);
-  const merkleTreePk = toPublicKey(cfg.merkleTree);
+  const collectionPk = toPublicKey(collectionMintAddr);
+  const merkleTreePk = toPublicKey(merkleTreeAddr);
 
   const fullMetadata = buildOnChainMetadata(profile, {
-    collectionMint: cfg.collectionMint,
-    merkleTree: cfg.merkleTree,
+    collectionMint: collectionMintAddr,
+    merkleTree: merkleTreeAddr,
   });
   const metadataUri = await uploadMetadataJSON(fullMetadata);
 
@@ -305,8 +253,8 @@ export async function mintRealPassport(
     mintSignature,
     freezeSignature: undefined as string | undefined,
     metadataUri,
-    collectionMint: cfg.collectionMint,
-    merkleTree: cfg.merkleTree,
+    collectionMint: collectionMintAddr,
+    merkleTree: merkleTreeAddr,
     network: "devnet",
   };
 }
