@@ -139,13 +139,16 @@
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
-  --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  /* Static HSL equivalents (base lightness + 9) replacing CSS relative-color syntax.
+     Browsers internally resolve relative-color via oklab, which html2canvas cannot parse,
+     causing "Failed to export passport: Attempting to parse an unsupported color function oklab". */
+  --sidebar-primary-border: hsl(270, 95%, 74%);
+  --sidebar-accent-border: hsl(165, 95%, 64%);
+  --primary-border: hsl(270, 95%, 74%);
+  --secondary-border: hsl(165, 95%, 64%);
+  --muted-border: hsl(240, 18%, 21%);
+  --accent-border: hsl(195, 100%, 64%);
+  --destructive-border: hsl(0, 75%, 69%);
 }
 
 @layer base {
