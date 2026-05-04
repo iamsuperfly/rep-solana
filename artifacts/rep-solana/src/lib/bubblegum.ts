@@ -30,13 +30,13 @@ import {
   findLeafAssetIdPda,
   burnV2,
   TokenStandard,
-  verifyCollection,
 } from "@metaplex-foundation/mpl-bubblegum";
 import {
   mplCore,
   createCollection,
 } from "@metaplex-foundation/mpl-core";
 import {
+  createSignerFromKeypair,
   generateSigner,
   publicKey as toPublicKey,
   some,
@@ -45,6 +45,7 @@ import {
   type PublicKey as UmiPublicKey,
 } from "@metaplex-foundation/umi";
 import { base58 } from "@metaplex-foundation/umi/serializers";
+import bs58 from "bs58";
 import type { ReputationProfile } from "./solana";
 import { buildOnChainMetadata, uploadMetadataJSON } from "./passport-metadata";
 
@@ -53,10 +54,10 @@ import { buildOnChainMetadata, uploadMetadataJSON } from "./passport-metadata";
 // ---------------------------------------------------------------------------
 
 export const OFFICIAL_COLLECTION_MINT =
-  "6eJ7sWmCv1C5A34cyybQ9sbxP85eK92MjCcpCxBE4x3u";
+  "2mLLJrgkntYd4i9UgFgtRQc7sXNAWVJxoQhyNZ5QN4ev";
 
 export const OFFICIAL_MERKLE_TREE =
-  "ECCGjAfZb9Va7NsDKnaVBvnUtGSUsLiopm9bwSM1sjoV";
+  "9CJRE5PWiy2PFZNrf6DecBqdBqDDNYVLsMHUi47BJPni";
 
 /** Devnet RPC. Honours VITE_HELIUS_RPC_URL if the user provides one. */
 export function getDevnetRpcUrl(): string {
@@ -186,6 +187,13 @@ export interface MintResult {
 /**
  * Mint the user's RepSolana passport as a real, on-chain, compressed,
  * soulbound NFT into the official RepSolana collection + Merkle tree.
+ *
+ * The official Merkle tree was created with `public: false`, so
+ * treeCreatorOrDelegate must cosign every mintV2 call.  We load that
+ * keypair from VITE_TREE_DELEGATE_SECRET (base58-encoded 64-byte Solana
+ * keypair of the dev wallet that owns the tree).  The connected user
+ * wallet is still the leaf owner and fee payer — it just doesn't need
+ * to be the tree authority.
  */
 export async function mintRealPassport(
   walletAdapter: WalletAdapter,
@@ -211,11 +219,37 @@ export async function mintRealPassport(
   const metadataUri = await uploadMetadataJSON(fullMetadata);
 
   const ownerPk = toPublicKey(owner);
+
+  // ── Tree-authority cosigner ───────────────────────────────────────────────
+  // The official tree was created with public=false, so mintV2 requires
+  // the tree creator / delegate to cosign.  VITE_TREE_DELEGATE_SECRET holds
+  // the base58-encoded 64-byte keypair of the dev wallet that owns the tree.
+  // This env var is bundled at build time (Vite VITE_ prefix) — never logged.
+  const delegateSecret =
+    (import.meta.env.VITE_TREE_DELEGATE_SECRET as string | undefined) ?? "";
+
+  let treeDelegateSigner: ReturnType<typeof createSignerFromKeypair> | undefined;
+  if (delegateSecret) {
+    try {
+      const secretBytes = bs58.decode(delegateSecret);
+      const umiKeypair = umi.eddsa.createKeypairFromSecretKey(
+        new Uint8Array(secretBytes),
+      );
+      treeDelegateSigner = createSignerFromKeypair(umi, umiKeypair);
+    } catch {
+      // Key parsing failed — mintV2 will fall back to umi.identity and
+      // will surface TreeAuthorityIncorrect if the tree is non-public.
+    }
+  }
+
   const mintBuilder = mintV2(umi, {
     leafOwner: ownerPk,
     leafDelegate: ownerPk,
     merkleTree: merkleTreePk,
     coreCollection: collectionPk,
+    ...(treeDelegateSigner
+      ? { treeCreatorOrDelegate: treeDelegateSigner }
+      : {}),
     metadata: {
       name: fullMetadata.name,
       symbol: "REPSOL",
