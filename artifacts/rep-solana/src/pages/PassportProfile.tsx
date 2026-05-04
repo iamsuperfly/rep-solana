@@ -25,14 +25,11 @@ import {
   ArrowLeft,
   Sparkles,
   ShieldCheck,
-  Camera,
-  Loader2,
 } from "lucide-react";
 import { ShareOnX } from "@/components/ShareOnX";
 import { scoreTier, getEndorsementView } from "@/lib/passport";
 import { getLeaderboardEntries } from "@/lib/passport";
 import { explorerTx, explorerAddress, solscanAsset } from "@/lib/bubblegum";
-import { screenshotPassport } from "@/lib/passport-screenshot";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 
@@ -47,22 +44,6 @@ export function PassportProfilePage() {
   const passport = usePassport(validAddress);
   const { data, loading, error } = useReputation(validAddress, "mainnet-beta");
   const [copied, setCopied] = useState(false);
-  const [screenshotting, setScreenshotting] = useState(false);
-
-  async function handleScreenshot() {
-    if (!validAddress || !data) return;
-    setScreenshotting(true);
-    try {
-      await screenshotPassport(validAddress);
-      toast({ title: "Screenshot saved", description: "PNG downloaded to your device" });
-    } catch (err) {
-      const e = err as Error;
-      toast({ title: "Screenshot failed", description: e.message, variant: "destructive" });
-    } finally {
-      setScreenshotting(false);
-    }
-  }
-
   if (!address || !validAddress) {
     return (
       <div className="mx-auto max-w-md px-4 py-24 text-center">
@@ -100,19 +81,8 @@ export function PassportProfilePage() {
           <ArrowLeft className="w-4 h-4" /> Home
         </Button>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleScreenshot}
-            disabled={screenshotting || !data}
-            className="gap-2"
-          >
-            {screenshotting ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Camera className="w-3.5 h-3.5" />
-            )}
-            {screenshotting ? "Capturing…" : "Screenshot"}
+          <Button variant="outline" size="sm" className="gap-2">
+            📸 Screenshot
           </Button>
           <ShareOnX
             address={validAddress}
