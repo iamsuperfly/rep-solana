@@ -1,7 +1,10 @@
 /**
- * Devnet status panel — shows the user's pre-initialised collection +
+ * Devnet status panel — shows the official RepSolana collection +
  * merkle tree, devnet SOL balance, and a one-click airdrop helper so
  * judges can fund a fresh wallet without leaving the page.
+ *
+ * The collection and Merkle tree are now the single official addresses
+ * shared by all users — no per-wallet initialization needed.
  */
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,27 +13,16 @@ import {
   getDevnetConfig,
   getDevnetBalance,
   explorerAddress,
-  type DevnetCollectionConfig,
+  OFFICIAL_COLLECTION_MINT,
+  OFFICIAL_MERKLE_TREE,
 } from "@/lib/bubblegum";
 import { Coins, ExternalLink, RefreshCcw, ShieldCheck } from "lucide-react";
 import { shortAddress } from "@/lib/format";
 
 export function DevnetSetupCard({ address }: { address: string }) {
-  const [cfg, setCfg] = useState<DevnetCollectionConfig | null>(() =>
-    getDevnetConfig(address),
-  );
+  const cfg = getDevnetConfig(address);
   const [balance, setBalance] = useState<number | null>(null);
   const [loadingBal, setLoadingBal] = useState(false);
-
-  useEffect(() => {
-    function refresh() {
-      setCfg(getDevnetConfig(address));
-    }
-    refresh();
-    window.addEventListener("repsolana:devnet-config-changed", refresh);
-    return () =>
-      window.removeEventListener("repsolana:devnet-config-changed", refresh);
-  }, [address]);
 
   async function refreshBalance() {
     setLoadingBal(true);
@@ -71,28 +63,18 @@ export function DevnetSetupCard({ address }: { address: string }) {
         </Button>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        {!cfg ? (
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            First-time setup creates a Metaplex Core collection with a{" "}
-            <code className="text-secondary/90">PermanentFreezeDelegate</code>{" "}
-            plugin and a small Bubblegum V2 merkle tree. Costs about{" "}
-            <strong>~0.018 devnet SOL</strong> — funded entirely by your
-            wallet, runs once.
-          </p>
-        ) : (
-          <div className="space-y-1.5 text-xs">
-            <Field
-              label="Core collection"
-              value={cfg.collectionMint}
-              href={explorerAddress(cfg.collectionMint, "devnet")}
-            />
-            <Field
-              label="Merkle tree"
-              value={cfg.merkleTree}
-              href={explorerAddress(cfg.merkleTree, "devnet")}
-            />
-          </div>
-        )}
+        <div className="space-y-1.5 text-xs">
+          <Field
+            label="Core collection"
+            value={cfg.collectionMint}
+            href={explorerAddress(cfg.collectionMint, "devnet")}
+          />
+          <Field
+            label="Merkle tree"
+            value={cfg.merkleTree}
+            href={explorerAddress(cfg.merkleTree, "devnet")}
+          />
+        </div>
 
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button
