@@ -25,14 +25,11 @@ import {
   ArrowLeft,
   Sparkles,
   ShieldCheck,
-  Download,
-  Loader2,
 } from "lucide-react";
 import { ShareOnX } from "@/components/ShareOnX";
 import { scoreTier, getEndorsementView } from "@/lib/passport";
 import { getLeaderboardEntries } from "@/lib/passport";
 import { explorerTx, explorerAddress, solscanAsset } from "@/lib/bubblegum";
-import { downloadPassportPNG } from "@/lib/passport-export";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 
@@ -49,25 +46,6 @@ export function PassportProfilePage() {
   // passport.network only records where the cNFT was minted — separate concern.
   const { data, loading, error } = useReputation(validAddress, "mainnet-beta");
   const [copied, setCopied] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-
-  async function handleDownloadPassport() {
-    if (!validAddress || !data) return;
-    setDownloading(true);
-    try {
-      await downloadPassportPNG(validAddress);
-      toast({ title: "Passport downloaded", description: "PNG saved to downloads" });
-    } catch (err) {
-      const e = err as Error;
-      toast({
-        title: "Download failed",
-        description: e.message,
-        variant: "destructive",
-      });
-    } finally {
-      setDownloading(false);
-    }
-  }
 
   if (!address || !validAddress) {
     return (
@@ -106,6 +84,9 @@ export function PassportProfilePage() {
           <ArrowLeft className="w-4 h-4" /> Home
         </Button>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" className="gap-2">
+            📸 Screenshot
+          </Button>
           <ShareOnX
             address={validAddress}
             score={data?.score.total}
@@ -118,16 +99,6 @@ export function PassportProfilePage() {
             {copied ? <Check className="w-3.5 h-3.5 text-secondary" /> : <Copy className="w-3.5 h-3.5" />}
             {copied ? "Copied" : "Copy link"}
           </Button>
-          {data && (
-            <Button variant="outline" size="sm" onClick={handleDownloadPassport} disabled={downloading} className="gap-2">
-              {downloading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Download className="w-3.5 h-3.5" />
-              )}
-              {downloading ? "Downloading…" : "Download PNG"}
-            </Button>
-          )}
           <a
             href={`https://solscan.io/account/${validAddress}`}
             target="_blank"
