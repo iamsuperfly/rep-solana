@@ -40,13 +40,6 @@ export interface ShareOnXProps {
   variant?: "default" | "outline" | "secondary" | "ghost";
 }
 
-function buildShareUrl(address: string, kind: ShareOnXProps["shareKind"]) {
-  if (typeof window === "undefined") return "";
-  const base = window.location.origin;
-  if (kind === "verify") return `${base}/verify/${address}`;
-  return `${base}/p/${address}`;
-}
-
 function buildTweetText(opts: ShareOnXProps): string {
   const parts: string[] = [];
   if (typeof opts.score === "number") {
@@ -67,11 +60,10 @@ export function ShareOnX(props: ShareOnXProps) {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
 
-  const url = buildShareUrl(props.address, props.shareKind);
   const text = buildTweetText(props);
   const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
     text,
-  )}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(HASHTAGS.join(","))}`;
+  )}&hashtags=${encodeURIComponent(HASHTAGS.join(","))}`;
 
   const handleClick = () => {
     if (typeof window === "undefined") return;
@@ -80,7 +72,7 @@ export function ShareOnX(props: ShareOnXProps) {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(`${text}\n${url}`);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       toast({ title: "Tweet copied", description: "Paste into X / threads / Farcaster" });
       setTimeout(() => setCopied(false), 1500);
