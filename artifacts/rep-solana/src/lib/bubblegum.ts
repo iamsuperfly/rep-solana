@@ -1,65 +1,25 @@
-/**
- * Real on-chain Metaplex Bubblegum V2 compressed NFT (cNFT) integration.
- *
- * Targets devnet for the Colosseum Frontier hackathon demo.
- *
- * Soulbound model:
- *   1. We create an MPL Core collection with the PermanentFreezeDelegate
- *      plugin set to `frozen: true`. Every cNFT minted into this
- *      collection inherits the freeze → no transfer is possible.
- *   2. After mintV2 we additionally call setNonTransferableV2 — belt &
- *      braces: the leaf flag is flipped on-chain so even the indexer
- *      reports the asset as non-transferable.
- *
- * All mints use the single official RepSolana collection + Merkle tree.
- * The "initialize" flow is no longer exposed to end users.
- */
-
-import {
-  createUmi,
-} from "@metaplex-foundation/umi-bundle-defaults";
-import {
-  walletAdapterIdentity,
-  type WalletAdapter,
-} from "@metaplex-foundation/umi-signer-wallet-adapters";
-import {
-  mplBubblegum,
-  createTreeV2,
-  mintV2,
-  parseLeafFromMintV2Transaction,
-  findLeafAssetIdPda,
-  burnV2,
-  TokenStandard,
-} from "@metaplex-foundation/mpl-bubblegum";
-import {
-  mplCore,
-  createCollection,
-} from "@metaplex-foundation/mpl-core";
-import {
-  createSignerFromKeypair,
-  generateSigner,
-  publicKey as toPublicKey,
-  some,
-  none,
-  type Umi,
-  type PublicKey as UmiPublicKey,
-} from "@metaplex-foundation/umi";
+import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
+import { walletAdapterIdentity, type WalletAdapter } from "@metaplex-foundation/umi-signer-wallet-adapters";
+import { mplBubblegum, createTreeV2, mintV2, parseLeafFromMintV2Transaction, findLeafAssetIdPda, burnV2, TokenStandard } from "@metaplex-foundation/mpl-bubblegum";
+import { mplCore, createCollection } from "@metaplex-foundation/mpl-core";
+import { createSignerFromKeypair, generateSigner, publicKey as toPublicKey, some, none, type Umi, type PublicKey as UmiPublicKey } from "@metaplex-foundation/umi";
 import { base58 } from "@metaplex-foundation/umi/serializers";
 import bs58 from "bs58";
 import type { ReputationProfile } from "./solana";
 import { buildOnChainMetadata, uploadMetadataJSON } from "./passport-metadata";
 
 // ---------------------------------------------------------------------------
-// Official RepSolana collection — all mints go here, no new trees/collections
+// Official RepSolana collection — all mints go here
 // ---------------------------------------------------------------------------
+export const OFFICIAL_COLLECTION_MINT = "2mLLJrgkntYd4i9UgFgtRQc7sXNAWVJxoQhyNZ5QN4ev";
+export const OFFICIAL_MERKLE_TREE = "9CJRE5PWiy2PFZNrf6DecBqdBqDDNYVLsMHUi47BJPni";
 
-export const OFFICIAL_COLLECTION_MINT =
-  "2mLLJrgkntYd4i9UgFgtRQc7sXNAWVJxoQhyNZ5QN4ev";
+/** 2^TREE_MAX_DEPTH = 32 leaf slots in the current Merkle tree. */
+export const TREE_MAX_CAPACITY = 32;
 
-export const OFFICIAL_MERKLE_TREE =
-  "9CJRE5PWiy2PFZNrf6DecBqdBqDDNYVLsMHUi47BJPni";
-
-/** Devnet RPC. Honours VITE_HELIUS_RPC_URL if the user provides one. */
+// ---------------------------------------------------------------------------
+// RPC helpers
+// ---------------------------------------------------------------------------
 export function getDevnetRpcUrl(): string {
   const override = (import.meta.env.VITE_HELIUS_RPC_URL as string | undefined) || "";
   if (override) return override;
@@ -68,19 +28,72 @@ export function getDevnetRpcUrl(): string {
   return "https://api.devnet.solana.com";
 }
 
-/** Build a Umi instance pointed at devnet, signed by the connected wallet. */
 export function buildUmi(walletAdapter: WalletAdapter): Umi {
-  const umi = createUmi(getDevnetRpcUrl())
+  return createUmi(getDevnetRpcUrl())
     .use(mplBubblegum())
     .use(mplCore())
     .use(walletAdapterIdentity(walletAdapter));
-  return umi;
+}
+
+// ---------------------------------------------------------------------------
+// Authority helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive the public key of the tree authority from VITE_TREE_DELEGATE_SECRET.
+ * No RPC call needed — used to show/hide the "Setup New Merkle Tree" button.
+ */
+export function getTreeDelegatePublicKey(): string | null {
+  const secret = (import.meta.env.VITE_TREE_DELEGATE_SECRET as string | undefined) ?? "";
+  if (!secret) return null;
+  try {
+    const umi = createUmi(getDevnetRpcUrl());
+    const secretBytes = bs58.decode(secret);
+    const keypair = umi.eddsa.createKeypairFromSecretKey(new Uint8Array(secretBytes));
+    return keypair.publicKey.toString();
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Capacity: count minted passports in the official collection via DAS
+// ---------------------------------------------------------------------------
+
+/**
+ * Query total mints in the official collection using getAssetsByGroup.
+ * Returns null if no DAS-capable RPC is configured.
+ */
+export async function getTreeMintCount(): Promise<number | null> {
+  const rpcUrl = getDevnetRpcUrl();
+  if (/api\.devnet\.solana\.com/.test(rpcUrl)) return null;
+  try {
+    const res = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "repsolana-capacity",
+        method: "getAssetsByGroup",
+        params: {
+          groupKey: "collection",
+          groupValue: OFFICIAL_COLLECTION_MINT,
+          limit: 1,
+          page: 1,
+        },
+      }),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { result?: { total?: number } };
+    return typeof json.result?.total === "number" ? json.result.total : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Per-wallet config — always returns the official collection + tree
 // ---------------------------------------------------------------------------
-
 export interface DevnetCollectionConfig {
   owner: string;
   collectionMint: string;
@@ -90,29 +103,15 @@ export interface DevnetCollectionConfig {
   verifiedCollectionSignature?: string;
 }
 
-/**
- * Always returns the official RepSolana collection config.
- * No per-wallet initialization needed — all wallets share the same
- * collection and Merkle tree.
- */
 export function getDevnetConfig(owner: string): DevnetCollectionConfig {
-  return {
-    owner,
-    collectionMint: OFFICIAL_COLLECTION_MINT,
-    merkleTree: OFFICIAL_MERKLE_TREE,
-    createdAt: 0,
-  };
+  return { owner, collectionMint: OFFICIAL_COLLECTION_MINT, merkleTree: OFFICIAL_MERKLE_TREE, createdAt: 0 };
 }
 
-/** No-op: kept for API compatibility. Use getDevnetConfig() — it always returns the official config. */
-export function clearDevnetConfig(_owner: string): void {
-  // No-op: config is now global (official collection), not per-wallet.
-}
+export function clearDevnetConfig(_owner: string): void {}
 
 // ---------------------------------------------------------------------------
-// Initialize: kept for collection-authority use only — not exposed to end users
+// One-time collection init (authority only)
 // ---------------------------------------------------------------------------
-
 export interface InitResult {
   collectionMint: string;
   merkleTree: string;
@@ -123,57 +122,66 @@ export interface InitResult {
 const TREE_MAX_DEPTH = 5;
 const TREE_MAX_BUFFER = 8;
 
-/**
- * One-time setup for the collection authority only.
- * End users should never call this — the official collection + tree are
- * already created and hardcoded above.
- */
-export async function initializeDevnetCollection(
-  walletAdapter: WalletAdapter,
-): Promise<InitResult> {
-  if (!walletAdapter.publicKey) {
-    throw new Error("Wallet not connected");
-  }
+export async function initializeDevnetCollection(walletAdapter: WalletAdapter): Promise<InitResult> {
+  if (!walletAdapter.publicKey) throw new Error("Wallet not connected");
   const umi = buildUmi(walletAdapter);
-
   const collectionSigner = generateSigner(umi);
-  const collectionTxBuilder = createCollection(umi, {
+  const collectionRes = await createCollection(umi, {
     collection: collectionSigner,
     name: "RepSolana Soulbound Reputation Passport",
     uri: "https://repsolana.app/collection.json",
-    plugins: [
-      { type: "BubblegumV2" },
-      { type: "PermanentFreezeDelegate", frozen: true },
-    ],
-  });
-
-  const collectionRes = await collectionTxBuilder.sendAndConfirm(umi, {
-    confirm: { commitment: "confirmed" },
-  });
-
+    plugins: [{ type: "BubblegumV2" }, { type: "PermanentFreezeDelegate", frozen: true }],
+  }).sendAndConfirm(umi, { confirm: { commitment: "confirmed" } });
   const merkleTreeSigner = generateSigner(umi);
-  const treeBuilder = await createTreeV2(umi, {
-    merkleTree: merkleTreeSigner,
-    maxDepth: TREE_MAX_DEPTH,
-    maxBufferSize: TREE_MAX_BUFFER,
-    public: false,
-  });
-  const treeRes = await treeBuilder.sendAndConfirm(umi, {
-    confirm: { commitment: "confirmed" },
-  });
-
+  const treeRes = await (
+    await createTreeV2(umi, {
+      merkleTree: merkleTreeSigner,
+      maxDepth: TREE_MAX_DEPTH,
+      maxBufferSize: TREE_MAX_BUFFER,
+      public: false,
+    })
+  ).sendAndConfirm(umi, { confirm: { commitment: "confirmed" } });
   return {
-    collectionMint: collectionSigner.publicKey,
-    merkleTree: merkleTreeSigner.publicKey,
+    collectionMint: collectionSigner.publicKey.toString(),
+    merkleTree: merkleTreeSigner.publicKey.toString(),
     collectionSignature: base58.deserialize(collectionRes.signature)[0],
     treeSignature: base58.deserialize(treeRes.signature)[0],
   };
 }
 
 // ---------------------------------------------------------------------------
-// Mint: real on-chain compressed soulbound passport
+// Create a NEW Merkle tree — authority only, called when tree fills up
 // ---------------------------------------------------------------------------
+export interface NewTreeResult {
+  merkleTree: string;
+  treeSignature: string;
+}
 
+/**
+ * Create a fresh tree under the existing official collection.
+ * After creation, update OFFICIAL_MERKLE_TREE in this file and redeploy.
+ */
+export async function createNewMerkleTree(walletAdapter: WalletAdapter): Promise<NewTreeResult> {
+  if (!walletAdapter.publicKey) throw new Error("Wallet not connected");
+  const umi = buildUmi(walletAdapter);
+  const merkleTreeSigner = generateSigner(umi);
+  const treeRes = await (
+    await createTreeV2(umi, {
+      merkleTree: merkleTreeSigner,
+      maxDepth: TREE_MAX_DEPTH,
+      maxBufferSize: TREE_MAX_BUFFER,
+      public: false,
+    })
+  ).sendAndConfirm(umi, { confirm: { commitment: "confirmed" } });
+  return {
+    merkleTree: merkleTreeSigner.publicKey.toString(),
+    treeSignature: base58.deserialize(treeRes.signature)[0],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mint
+// ---------------------------------------------------------------------------
 export interface MintResult {
   assetId: string;
   mintSignature: string;
@@ -184,62 +192,30 @@ export interface MintResult {
   network: "devnet";
 }
 
-/**
- * Mint the user's RepSolana passport as a real, on-chain, compressed,
- * soulbound NFT into the official RepSolana collection + Merkle tree.
- *
- * The official Merkle tree was created with `public: false`, so
- * treeCreatorOrDelegate must cosign every mintV2 call.  We load that
- * keypair from VITE_TREE_DELEGATE_SECRET (base58-encoded 64-byte Solana
- * keypair of the dev wallet that owns the tree).  The connected user
- * wallet is still the leaf owner and fee payer — it just doesn't need
- * to be the tree authority.
- */
 export async function mintRealPassport(
   walletAdapter: WalletAdapter,
   profile: ReputationProfile,
 ): Promise<MintResult> {
-  if (!walletAdapter.publicKey) {
-    throw new Error("Wallet not connected");
-  }
+  if (!walletAdapter.publicKey) throw new Error("Wallet not connected");
   const owner = walletAdapter.publicKey.toBase58();
-
-  // Always use the official collection + tree — no per-wallet config needed.
-  const collectionMintAddr = OFFICIAL_COLLECTION_MINT;
-  const merkleTreeAddr = OFFICIAL_MERKLE_TREE;
-
   const umi = buildUmi(walletAdapter);
-  const collectionPk = toPublicKey(collectionMintAddr);
-  const merkleTreePk = toPublicKey(merkleTreeAddr);
-
+  const collectionPk = toPublicKey(OFFICIAL_COLLECTION_MINT);
+  const merkleTreePk = toPublicKey(OFFICIAL_MERKLE_TREE);
   const fullMetadata = buildOnChainMetadata(profile, {
-    collectionMint: collectionMintAddr,
-    merkleTree: merkleTreeAddr,
+    collectionMint: OFFICIAL_COLLECTION_MINT,
+    merkleTree: OFFICIAL_MERKLE_TREE,
   });
   const metadataUri = await uploadMetadataJSON(fullMetadata);
-
   const ownerPk = toPublicKey(owner);
 
-  // ── Tree-authority cosigner ───────────────────────────────────────────────
-  // The official tree was created with public=false, so mintV2 requires
-  // the tree creator / delegate to cosign.  VITE_TREE_DELEGATE_SECRET holds
-  // the base58-encoded 64-byte keypair of the dev wallet that owns the tree.
-  // This env var is bundled at build time (Vite VITE_ prefix) — never logged.
-  const delegateSecret =
-    (import.meta.env.VITE_TREE_DELEGATE_SECRET as string | undefined) ?? "";
-
+  const delegateSecret = (import.meta.env.VITE_TREE_DELEGATE_SECRET as string | undefined) ?? "";
   let treeDelegateSigner: ReturnType<typeof createSignerFromKeypair> | undefined;
   if (delegateSecret) {
     try {
       const secretBytes = bs58.decode(delegateSecret);
-      const umiKeypair = umi.eddsa.createKeypairFromSecretKey(
-        new Uint8Array(secretBytes),
-      );
+      const umiKeypair = umi.eddsa.createKeypairFromSecretKey(new Uint8Array(secretBytes));
       treeDelegateSigner = createSignerFromKeypair(umi, umiKeypair);
-    } catch {
-      // Key parsing failed — mintV2 will fall back to umi.identity and
-      // will surface TreeAuthorityIncorrect if the tree is non-public.
-    }
+    } catch { /* fall through */ }
   }
 
   const mintBuilder = mintV2(umi, {
@@ -247,9 +223,7 @@ export async function mintRealPassport(
     leafDelegate: ownerPk,
     merkleTree: merkleTreePk,
     coreCollection: collectionPk,
-    ...(treeDelegateSigner
-      ? { treeCreatorOrDelegate: treeDelegateSigner }
-      : {}),
+    ...(treeDelegateSigner ? { treeCreatorOrDelegate: treeDelegateSigner } : {}),
     metadata: {
       name: fullMetadata.name,
       symbol: "REPSOL",
@@ -259,120 +233,71 @@ export async function mintRealPassport(
       isMutable: true,
       tokenStandard: some(TokenStandard.NonFungible),
       collection: some(collectionPk),
-      creators: [
-        {
-          address: ownerPk,
-          verified: false,
-          share: 100,
-        },
-      ],
+      creators: [{ address: ownerPk, verified: false, share: 100 }],
     },
     assetData: none(),
     assetDataSchema: none(),
   });
 
-  const mintRes = await mintBuilder.sendAndConfirm(umi, {
-    confirm: { commitment: "confirmed" },
-  });
+  const mintRes = await mintBuilder.sendAndConfirm(umi, { confirm: { commitment: "confirmed" } });
   const mintSignature = base58.deserialize(mintRes.signature)[0];
-
   const leaf = await parseLeafWithRetry(umi, mintRes.signature);
-  const [assetIdPda] = findLeafAssetIdPda(umi, {
-    merkleTree: merkleTreePk,
-    leafIndex: leaf.nonce,
-  });
+  const [assetIdPda] = findLeafAssetIdPda(umi, { merkleTree: merkleTreePk, leafIndex: leaf.nonce });
 
-  return {
-    assetId: assetIdPda.toString(),
-    mintSignature,
-    freezeSignature: undefined as string | undefined,
-    metadataUri,
-    collectionMint: collectionMintAddr,
-    merkleTree: merkleTreeAddr,
-    network: "devnet",
-  };
+  return { assetId: assetIdPda.toString(), mintSignature, freezeSignature: undefined, metadataUri, collectionMint: OFFICIAL_COLLECTION_MINT, merkleTree: OFFICIAL_MERKLE_TREE, network: "devnet" };
 }
 
-/**
- * Burn an old passport cNFT on-chain using Bubblegum V2 burnV2 instruction.
- * Requires DAS compression data to construct the proof.
- */
+// ---------------------------------------------------------------------------
+// Burn
+// ---------------------------------------------------------------------------
 export async function burnPassportOnChain(
   walletAdapter: WalletAdapter,
   merkleTree: string,
   leafIndex: number,
   leafOwner: string,
-  compressionData: {
-    dataHash: Uint8Array;
-    creatorHash: Uint8Array;
-    root: Uint8Array;
-  },
+  compressionData: { dataHash: Uint8Array; creatorHash: Uint8Array; root: Uint8Array },
 ): Promise<string> {
-  if (!walletAdapter.publicKey) {
-    throw new Error("Wallet not connected");
-  }
-
+  if (!walletAdapter.publicKey) throw new Error("Wallet not connected");
   const umi = buildUmi(walletAdapter);
-  const merkleTreePk = toPublicKey(merkleTree);
-  const leafOwnerPk = toPublicKey(leafOwner);
-
-  const burnBuilder = burnV2(umi, {
-    merkleTree: merkleTreePk,
+  const burnRes = await burnV2(umi, {
+    merkleTree: toPublicKey(merkleTree),
     root: compressionData.root,
     index: leafIndex,
     nonce: leafIndex,
     dataHash: compressionData.dataHash,
     creatorHash: compressionData.creatorHash,
-    leafOwner: leafOwnerPk,
-    leafDelegate: leafOwnerPk,
-  });
-
-  const burnRes = await burnBuilder.sendAndConfirm(umi, {
-    confirm: { commitment: "confirmed" },
-  });
-
+    leafOwner: toPublicKey(leafOwner),
+    leafDelegate: toPublicKey(leafOwner),
+  }).sendAndConfirm(umi, { confirm: { commitment: "confirmed" } });
   return base58.deserialize(burnRes.signature)[0];
 }
 
-async function parseLeafWithRetry(
-  umi: Umi,
-  signature: Uint8Array,
-  attempts = 12,
-): Promise<{ nonce: bigint }> {
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+async function parseLeafWithRetry(umi: Umi, signature: Uint8Array, attempts = 12): Promise<{ nonce: bigint }> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i += 1) {
     try {
       const tx = await umi.rpc.getTransaction(signature);
-      if (tx) {
-        return await parseLeafFromMintV2Transaction(umi, signature);
-      }
+      if (tx) return await parseLeafFromMintV2Transaction(umi, signature);
     } catch (err) {
       lastErr = err;
       const msg = (err as Error)?.message ?? "";
-      if (!/Could not get transaction|getTransaction|fetch/i.test(msg)) {
-        throw err;
-      }
+      if (!/Could not get transaction|getTransaction|fetch/i.test(msg)) throw err;
     }
-    const wait = Math.min(1500, 400 + i * 200);
-    await new Promise((r) => setTimeout(r, wait));
+    await new Promise((r) => setTimeout(r, Math.min(1500, 400 + i * 200)));
   }
-  throw new Error(
-    "Mint landed on-chain but the RPC indexer is lagging — refresh the page in a few seconds to see your passport. " +
-      ((lastErr as Error)?.message ?? ""),
-  );
+  throw new Error("Mint landed on-chain but the RPC indexer is lagging — refresh in a few seconds. " + ((lastErr as Error)?.message ?? ""));
 }
 
-export async function requestDevnetAirdrop(
-  walletAdapter: WalletAdapter,
-  amountSol = 1,
-): Promise<string> {
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+export async function requestDevnetAirdrop(walletAdapter: WalletAdapter, amountSol = 1): Promise<string> {
   if (!walletAdapter.publicKey) throw new Error("Wallet not connected");
   const umi = buildUmi(walletAdapter);
-  await umi.rpc.airdrop(toPublicKey(walletAdapter.publicKey.toBase58()), {
-    basisPoints: BigInt(Math.round(amountSol * 1_000_000_000)),
-    identifier: "SOL",
-    decimals: 9,
-  });
+  await umi.rpc.airdrop(toPublicKey(walletAdapter.publicKey.toBase58()), { basisPoints: BigInt(Math.round(amountSol * 1_000_000_000)), identifier: "SOL", decimals: 9 });
   return "ok";
 }
 
@@ -383,18 +308,13 @@ export async function getDevnetBalance(address: string): Promise<number> {
 }
 
 export function explorerTx(sig: string, network: "devnet" | "mainnet-beta" = "devnet") {
-  const cluster = network === "devnet" ? "?cluster=devnet" : "";
-  return `https://explorer.solana.com/tx/${sig}${cluster}`;
+  return `https://explorer.solana.com/tx/${sig}${network === "devnet" ? "?cluster=devnet" : ""}`;
 }
-
 export function explorerAddress(addr: string, network: "devnet" | "mainnet-beta" = "devnet") {
-  const cluster = network === "devnet" ? "?cluster=devnet" : "";
-  return `https://explorer.solana.com/address/${addr}${cluster}`;
+  return `https://explorer.solana.com/address/${addr}${network === "devnet" ? "?cluster=devnet" : ""}`;
 }
-
 export function solscanAsset(assetId: string, network: "devnet" | "mainnet-beta" = "devnet") {
-  const cluster = network === "devnet" ? "?cluster=devnet" : "";
-  return `https://solscan.io/token/${assetId}${cluster}`;
+  return `https://solscan.io/token/${assetId}${network === "devnet" ? "?cluster=devnet" : ""}`;
 }
 
 export type { UmiPublicKey };
