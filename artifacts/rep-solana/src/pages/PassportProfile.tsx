@@ -44,6 +44,7 @@ export function PassportProfilePage() {
   const passport = usePassport(validAddress);
   const { data, loading, error } = useReputation(validAddress, "mainnet-beta");
   const [copied, setCopied] = useState(false);
+
   if (!address || !validAddress) {
     return (
       <div className="mx-auto max-w-md px-4 py-24 text-center">
